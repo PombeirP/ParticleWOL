@@ -1,6 +1,5 @@
 package com.pedropombeiro.sparkwol;
 
-import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.AsyncTask;
@@ -11,6 +10,7 @@ import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.Toast;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -20,7 +20,7 @@ import java.net.URL;
 
 public class MainActivity extends ActionBarActivity {
 
-    private InvokeSparkRestMethod invokeSparkRestMethod;
+    private InvokeSparkPostMethodTask invokeSparkPostMethodTask;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,12 +55,12 @@ public class MainActivity extends ActionBarActivity {
     }
 
     public void onWakeComputerButtonClick(View view) {
-        invokeSparkRestMethod = new InvokeSparkRestMethod();
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
-        invokeSparkRestMethod.execute("wakeHome", sharedPreferences.getString("device_id", ""), sharedPreferences.getString("authentication_token", ""));
+        this.invokeSparkPostMethodTask = new InvokeSparkPostMethodTask();
+        this.invokeSparkPostMethodTask.execute("wakeHome", sharedPreferences.getString("device_id", ""), sharedPreferences.getString("authentication_token", ""));
     }
 
-    private class InvokeSparkRestMethod extends AsyncTask<String, String, String> {
+    private class InvokeSparkPostMethodTask extends AsyncTask<String, String, String> {
 
         @Override
         protected String doInBackground(String... params) {
@@ -95,6 +95,7 @@ public class MainActivity extends ActionBarActivity {
 
         @Override
         protected void onPostExecute(String result) {
+            Toast.makeText(getBaseContext(), "Sent wake request", Toast.LENGTH_LONG).show();
             Log.i("FromOnPostExecute", result);
         }
     }

@@ -3,21 +3,31 @@ package com.pedropombeiro.sparkwol;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.res.Configuration;
-import android.media.Ringtone;
-import android.media.RingtoneManager;
-import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
+import android.preference.EditTextPreference;
 import android.preference.ListPreference;
 import android.preference.Preference;
 import android.preference.PreferenceActivity;
-import android.preference.PreferenceCategory;
 import android.preference.PreferenceFragment;
 import android.preference.PreferenceManager;
-import android.preference.RingtonePreference;
-import android.text.TextUtils;
+import android.util.Log;
+import android.widget.Toast;
 
+import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -39,6 +49,8 @@ public class SettingsActivity extends PreferenceActivity {
      * shown on tablets.
      */
     private static final boolean ALWAYS_SIMPLE_PREFS = false;
+    private static final String AUTHENTICATION_TOKEN = "authentication_token";
+    private static final String DEVICE_ID = "device_id";
 
 
     @Override
@@ -46,6 +58,87 @@ public class SettingsActivity extends PreferenceActivity {
         super.onPostCreate(savedInstanceState);
 
         setupSimplePreferencesScreen();
+    }
+
+    private class InvokeSparkGetMethodTask extends AsyncTask<String, Void, String> {
+        private final String authToken;
+
+        public InvokeSparkGetMethodTask(String authToken) {
+            this.authToken = authToken;
+        }
+
+        private String GET(String url, String authToken){
+            InputStream inputStream = null;
+            String result = "";
+            try {
+                // create HttpClient
+                HttpClient httpclient = new DefaultHttpClient();
+
+                // make GET request to the given URL
+                HttpGet request = new HttpGet(url);
+                request.addHeader("Authorization", String.format("Bearer %s", authToken));
+
+                HttpResponse httpResponse = httpclient.execute(request);
+
+                // receive response as inputStream
+                inputStream = httpResponse.getEntity().getContent();
+
+                // convert inputstream to string
+                if(inputStream != null)
+                    result = convertInputStreamToString(inputStream);
+                else
+                    result = "Did not work!";
+
+            } catch (Exception e) {
+                Log.d("InputStream", e.getLocalizedMessage());
+            }
+
+            return result;
+        }
+
+        // convert inputstream to String
+        private String convertInputStreamToString(InputStream inputStream) throws IOException {
+            BufferedReader bufferedReader = new BufferedReader( new InputStreamReader(inputStream));
+            String line = "";
+            String result = "";
+            while((line = bufferedReader.readLine()) != null)
+                result += line;
+
+            inputStream.close();
+            return result;
+
+        }
+
+        @Override
+        protected String doInBackground(String... params) {
+            return GET(params[0], this.authToken);
+        }
+        // onPostExecute displays the results of the AsyncTask.
+        @Override
+        protected void onPostExecute(String result) {
+            try {
+                JSONArray deviceArray = new JSONArray(result);
+                List<String> entries = new ArrayList<String>(deviceArray.length());
+                List<String> entryValues = new ArrayList<String>(deviceArray.length());
+
+                for (int i = 0; i < deviceArray.length(); ++i) {
+                    JSONObject device = deviceArray.getJSONObject(i);
+                    entries.add(device.getString("name"));
+                    entryValues.add(device.getString("id"));
+                }
+
+                ListPreference deviceIdPreference = (ListPreference) findPreference(DEVICE_ID);
+                deviceIdPreference.setEntries(entries.toArray(new String[entries.size()]));
+                deviceIdPreference.setEntryValues(entryValues.toArray(new String[entryValues.size()]));
+
+                bindPreferenceSummaryToValue(deviceIdPreference);
+            }
+            catch (JSONException e)
+            {
+                Toast.makeText(getBaseContext(), "Error requesting Spark device list", Toast.LENGTH_LONG).show();
+                Log.w("FromOnPostExecute", e.getMessage());
+            }
+        }
     }
 
     /**
@@ -67,8 +160,7 @@ public class SettingsActivity extends PreferenceActivity {
         // Bind the summaries of EditText/List/Dialog/Ringtone preferences to
         // their values. When their values change, their summaries are updated
         // to reflect the new value, per the Android Design guidelines.
-        bindPreferenceSummaryToValue(findPreference("device_id"));
-        bindPreferenceSummaryToValue(findPreference("authentication_token"));
+        bindPreferenceSummaryToValue(findPreference(AUTHENTICATION_TOKEN));
     }
 
     /**
@@ -116,7 +208,7 @@ public class SettingsActivity extends PreferenceActivity {
      * A preference value change listener that updates the preference's summary
      * to reflect its new value.
      */
-    private static Preference.OnPreferenceChangeListener sBindPreferenceSummaryToValueListener = new Preference.OnPreferenceChangeListener() {
+    private Preference.OnPreferenceChangeListener sBindPreferenceSummaryToValueListener = new Preference.OnPreferenceChangeListener() {
         @Override
         public boolean onPreferenceChange(Preference preference, Object value) {
             String stringValue = value.toString();
@@ -138,6 +230,50 @@ public class SettingsActivity extends PreferenceActivity {
                 // simple string representation.
                 preference.setSummary(stringValue);
             }
+
+            ListPreference deviceIdPreference = null;
+            CharSequence[] deviceIdEntries = null;
+            String authToken = "";
+            String preferenceKey = preference.getKey();
+            if (preferenceKey.equals(AUTHENTICATION_TOKEN)) {
+                authToken = stringValue;
+                deviceIdPreference = (ListPreference) preference.getPreferenceManager().findPreference(DEVICE_ID);
+                deviceIdEntries = deviceIdPreference.getEntries();
+            }
+            else if (preferenceKey.equals(DEVICE_ID)) {
+                EditTextPreference authTokenPreference = (EditTextPreference) preference.getPreferenceManager().findPreference(AUTHENTICATION_TOKEN);
+
+                deviceIdPreference = (ListPreference) preference;
+                deviceIdEntries = deviceIdPreference.getEntries();
+                authToken = authTokenPreference.getText();
+            }
+
+            // update device list preference enabled state
+            deviceIdPreference.setEnabled(authToken.length() > 0 && deviceIdEntries != null && deviceIdEntries.length > 0);
+
+            // update device list preference summary
+            if (authToken.length() > 0) {
+                if (deviceIdPreference != null && deviceIdEntries != null) {
+                    if (deviceIdEntries.length > 0) {
+                        if (deviceIdPreference.getEntry() == null) {
+                            deviceIdPreference.setSummary(R.string.pref_device_select_device);
+                        }
+                    }
+                    else {
+                        deviceIdPreference.setSummary(R.string.pref_device_no_devices_found);
+                    }
+                }
+            }
+            else {
+                deviceIdPreference.setSummary("");
+            }
+
+            // If authentication token changes, request list of devices again
+            if (preferenceKey.equals(AUTHENTICATION_TOKEN) && authToken.length() > 0) {
+                // HTTP Get
+                new InvokeSparkGetMethodTask(authToken).execute("https://api.spark.io/v1/devices");
+            }
+
             return true;
         }
     };
@@ -151,7 +287,7 @@ public class SettingsActivity extends PreferenceActivity {
      *
      * @see #sBindPreferenceSummaryToValueListener
      */
-    private static void bindPreferenceSummaryToValue(Preference preference) {
+    private void bindPreferenceSummaryToValue(Preference preference) {
         // Set the listener to watch for value changes.
         preference.setOnPreferenceChangeListener(sBindPreferenceSummaryToValueListener);
 
@@ -168,7 +304,7 @@ public class SettingsActivity extends PreferenceActivity {
      * activity is showing a two-pane settings UI.
      */
     @TargetApi(Build.VERSION_CODES.HONEYCOMB)
-    public static class GeneralPreferenceFragment extends PreferenceFragment {
+    public class GeneralPreferenceFragment extends PreferenceFragment {
         @Override
         public void onCreate(Bundle savedInstanceState) {
             super.onCreate(savedInstanceState);
@@ -178,8 +314,8 @@ public class SettingsActivity extends PreferenceActivity {
             // to their values. When their values change, their summaries are
             // updated to reflect the new value, per the Android Design
             // guidelines.
-            bindPreferenceSummaryToValue(findPreference("device_id"));
-            bindPreferenceSummaryToValue(findPreference("authentication_token"));
+            bindPreferenceSummaryToValue(findPreference(DEVICE_ID));
+            bindPreferenceSummaryToValue(findPreference(AUTHENTICATION_TOKEN));
         }
     }
 }

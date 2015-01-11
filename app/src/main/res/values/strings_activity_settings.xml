@@ -5,8 +5,10 @@
     <!-- Example General settings -->
     <string name="pref_header_general">General</string>
 
-    <string name="pref_device_id">Spark device ID</string>
-    <string name="pref_default_device_id">53ff70066667574837362167</string>
+    <string name="pref_device_id">Spark device</string>
+    <string name="pref_device_requesting_devices">Requesting Spark device list</string>
+    <string name="pref_device_select_device">Select a Spark device</string>
+    <string name="pref_device_no_devices_found">No Spark devices found</string>
 
     <string name="pref_authentication_token">Authentication token</string>
 </resources>
