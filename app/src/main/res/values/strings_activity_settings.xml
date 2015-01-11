@@ -1,0 +1,12 @@
+<resources>
+
+    <!-- Strings related to Settings -->
+
+    <!-- Example General settings -->
+    <string name="pref_header_general">General</string>
+
+    <string name="pref_device_id">Spark device ID</string>
+    <string name="pref_default_device_id">53ff70066667574837362167</string>
+
+    <string name="pref_authentication_token">Authentication token</string>
+</resources>
