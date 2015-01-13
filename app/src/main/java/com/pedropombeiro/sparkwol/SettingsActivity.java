@@ -3,7 +3,6 @@ package com.pedropombeiro.sparkwol;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.res.Configuration;
-import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.preference.EditTextPreference;
@@ -15,18 +14,10 @@ import android.preference.PreferenceManager;
 import android.util.Log;
 import android.widget.Toast;
 
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.DefaultHttpClient;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -60,59 +51,17 @@ public class SettingsActivity extends PreferenceActivity {
         setupSimplePreferencesScreen();
     }
 
-    private class InvokeSparkGetMethodTask extends AsyncTask<String, Void, String> {
-        private final String authToken;
-
-        public InvokeSparkGetMethodTask(String authToken) {
-            this.authToken = authToken;
-        }
-
-        private String GET(String url, String authToken){
-            InputStream inputStream = null;
-            String result = "";
-            try {
-                // create HttpClient
-                HttpClient httpclient = new DefaultHttpClient();
-
-                // make GET request to the given URL
-                HttpGet request = new HttpGet(url);
-                request.addHeader("Authorization", String.format("Bearer %s", authToken));
-
-                HttpResponse httpResponse = httpclient.execute(request);
-
-                // receive response as inputStream
-                inputStream = httpResponse.getEntity().getContent();
-
-                // convert inputstream to string
-                if(inputStream != null)
-                    result = convertInputStreamToString(inputStream);
-                else
-                    result = "Did not work!";
-
-            } catch (Exception e) {
-                Log.d("InputStream", e.getLocalizedMessage());
-            }
-
-            return result;
-        }
-
-        // convert inputstream to String
-        private String convertInputStreamToString(InputStream inputStream) throws IOException {
-            BufferedReader bufferedReader = new BufferedReader( new InputStreamReader(inputStream));
-            String line = "";
-            String result = "";
-            while((line = bufferedReader.readLine()) != null)
-                result += line;
-
-            inputStream.close();
-            return result;
-
+    private class InvokeSparkGetDevicesMethodTask extends InvokeSparkGetMethodTaskBase {
+        public InvokeSparkGetDevicesMethodTask(String authToken)
+        {
+            super(authToken);
         }
 
         @Override
-        protected String doInBackground(String... params) {
-            return GET(params[0], this.authToken);
+        protected String GetUrl() {
+            return "https://api.spark.io/v1/devices";
         }
+
         // onPostExecute displays the results of the AsyncTask.
         @Override
         protected void onPostExecute(String result) {
@@ -271,7 +220,7 @@ public class SettingsActivity extends PreferenceActivity {
             // If authentication token changes, request list of devices again
             if (preferenceKey.equals(AUTHENTICATION_TOKEN) && authToken.length() > 0) {
                 // HTTP Get
-                new InvokeSparkGetMethodTask(authToken).execute("https://api.spark.io/v1/devices");
+                new InvokeSparkGetDevicesMethodTask(authToken).execute();
             }
 
             return true;
