@@ -2,7 +2,6 @@ package com.pedropombeiro.sparkwol;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.preference.PreferenceManager;
@@ -13,13 +12,14 @@ import android.view.MenuItem;
 import android.view.View;
 import android.widget.Toast;
 
+import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.DefaultHttpClient;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
+import java.io.InputStream;
 
 
 public class MainActivity extends ActionBarActivity {
@@ -64,38 +64,42 @@ public class MainActivity extends ActionBarActivity {
         this.invokeSparkPostMethodTask.execute();
     }
 
-    private class InvokeSparkPostMethodTask extends AsyncTask<String, String, String> {
-
+    private class InvokeSparkPostMethodTask extends InvokeHttpMethodTaskBase {
         private final String method;
         private final String deviceId;
-        private final String authenticationToken;
 
         public InvokeSparkPostMethodTask(String method, String deviceId, String authenticationToken) {
+            super(authenticationToken);
+
             this.method = method;
             this.deviceId = deviceId;
-            this.authenticationToken = authenticationToken;
+        }
+
+        @Override
+        protected String GetUrl() {
+            return String.format("https://api.spark.io/v1/devices/%s/%s", this.deviceId, this.method);
         }
 
         @Override
         protected String doInBackground(String... params) {
-            String urlString = String.format("https://api.spark.io/v1/devices/%s/%s", this.deviceId, this.method); // URL to call
+            InputStream inputStream = null;
             String result = "";
 
             // HTTP Post
             try {
-                URL url = new URL(urlString);
-                HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection();
-                urlConnection.setRequestMethod("POST");
-                urlConnection.setRequestProperty("Authorization", String.format("Bearer %s", this.authenticationToken));
+                HttpClient httpclient = new DefaultHttpClient();
+                HttpPost request = new HttpPost(this.GetUrl());
+                request.addHeader("Authorization", String.format("Bearer %s", this.authenticationToken));
 
-                BufferedReader in = new BufferedReader(new InputStreamReader(urlConnection.getInputStream()));
-                String inputLine;
-                StringBuffer response = new StringBuffer();
+                HttpResponse httpResponse = httpclient.execute(request);
 
-                while ((inputLine = in.readLine()) != null) {
-                    response.append(inputLine);
-                }
-                in.close();
+                // receive response as inputStream
+                inputStream = httpResponse.getEntity().getContent();
+
+                if(inputStream != null)
+                    result = convertInputStreamToString(inputStream);
+                else
+                    result = "Did not work!";
             } catch (Exception e) {
                 System.out.println(e.getMessage());
                 return e.getMessage();
@@ -105,6 +109,24 @@ public class MainActivity extends ActionBarActivity {
 
         @Override
         protected void onPostExecute(String result) {
+            try {
+                JSONObject response = new JSONObject(result);
+                if (response.has("code")) {
+                    int code = response.getInt("code");
+                    if (code >= 400) {
+                        Toast.makeText(getBaseContext(), String.format("Couldn't send wake request:\n%s", response.getString("error_description")), Toast.LENGTH_LONG).show();
+                        Log.i("FromOnPostExecute", result);
+                        return;
+                    }
+                }
+            } catch (JSONException e) {
+                e.printStackTrace();
+                return;
+            }
+
+            Toast.makeText(getBaseContext(), "Sent wake request", Toast.LENGTH_LONG).show();
+            Log.i("FromOnPostExecute", result);
+
             Runnable getStateVariableRunnable = new Runnable() {
                 @Override
                 public void run() {
@@ -114,9 +136,6 @@ public class MainActivity extends ActionBarActivity {
 
             Handler handler = new Handler();
             handler.postDelayed(getStateVariableRunnable, 2000);
-
-            Toast.makeText(getBaseContext(), "Sent wake request", Toast.LENGTH_LONG).show();
-            Log.i("FromOnPostExecute", result);
         }
     }
 
@@ -138,10 +157,19 @@ public class MainActivity extends ActionBarActivity {
         protected void onPostExecute(String result) {
             try {
                 JSONObject response = new JSONObject(result);
+                if (response.has("code")) {
+                    int code = response.getInt("code");
+                    if (code >= 400) {
+                        Toast.makeText(getBaseContext(), String.format("Could not retrieve status from Spark:\n%s", response.getString("error_description")), Toast.LENGTH_LONG).show();
+                        Log.i("FromOnPostExecute", result);
+                        return;
+                    }
+                }
 
                 String state = response.getString("result");
                 switch (state)
                 {
+                    case "Sent WOL":
                     case "Pinging":
                     {
                         Runnable runnable = new Runnable() {
