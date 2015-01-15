@@ -13,4 +13,6 @@
     <string name="pref_authentication_token">Authentication token</string>
 
     <string name="pref_ip_address">IP Address</string>
+
+    <string name="pref_mac_address">MAC Address</string>
 </resources>

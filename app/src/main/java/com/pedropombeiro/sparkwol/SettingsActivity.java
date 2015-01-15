@@ -40,10 +40,6 @@ public class SettingsActivity extends PreferenceActivity {
      * shown on tablets.
      */
     private static final boolean ALWAYS_SIMPLE_PREFS = false;
-    private static final String AUTHENTICATION_TOKEN = "authentication_token";
-    private static final String DEVICE_ID = "device_id";
-    private static final String IP_ADDRESS = "ip_address";
-
 
     @Override
     protected void onPostCreate(Bundle savedInstanceState) {
@@ -77,7 +73,7 @@ public class SettingsActivity extends PreferenceActivity {
                     entryValues.add(device.getString("id"));
                 }
 
-                ListPreference deviceIdPreference = (ListPreference) findPreference(DEVICE_ID);
+                ListPreference deviceIdPreference = (ListPreference) findPreference(PreferenceKeys.DEVICE_ID);
                 deviceIdPreference.setEntries(entries.toArray(new String[entries.size()]));
                 deviceIdPreference.setEntryValues(entryValues.toArray(new String[entryValues.size()]));
 
@@ -98,6 +94,14 @@ public class SettingsActivity extends PreferenceActivity {
      */
     private void setupSimplePreferencesScreen() {
         if (!isSimplePreferences(this)) {
+            // Bind the summaries of EditText/List/Dialog/Ringtone preferences
+            // to their values. When their values change, their summaries are
+            // updated to reflect the new value, per the Android Design
+            // guidelines.
+            bindPreferenceSummaryToValue(findPreference(PreferenceKeys.DEVICE_ID));
+            bindPreferenceSummaryToValue(findPreference(PreferenceKeys.AUTHENTICATION_TOKEN));
+            bindPreferenceSummaryToValue(findPreference(PreferenceKeys.IP_ADDRESS));
+            bindPreferenceSummaryToValue(findPreference(PreferenceKeys.MAC_ADDRESS));
             return;
         }
 
@@ -107,15 +111,20 @@ public class SettingsActivity extends PreferenceActivity {
         // Add 'general' preferences.
         addPreferencesFromResource(R.xml.pref_general);
         IPAddressPreference ipAddressPreference = new IPAddressPreference(this);
-        ipAddressPreference.setKey(IP_ADDRESS);
+        ipAddressPreference.setKey(PreferenceKeys.IP_ADDRESS);
         ipAddressPreference.setTitle(R.string.pref_ip_address);
         getPreferenceScreen().addPreference(ipAddressPreference);
+        MacAddressPreference macAddressPreference = new MacAddressPreference(this);
+        macAddressPreference.setKey(PreferenceKeys.MAC_ADDRESS);
+        macAddressPreference.setTitle(R.string.pref_mac_address);
+        getPreferenceScreen().addPreference(macAddressPreference);
 
         // Bind the summaries of EditText/List/Dialog/Ringtone preferences to
         // their values. When their values change, their summaries are updated
         // to reflect the new value, per the Android Design guidelines.
-        bindPreferenceSummaryToValue(findPreference(AUTHENTICATION_TOKEN));
-        bindPreferenceSummaryToValue(findPreference(IP_ADDRESS));
+        bindPreferenceSummaryToValue(findPreference(PreferenceKeys.AUTHENTICATION_TOKEN));
+        bindPreferenceSummaryToValue(findPreference(PreferenceKeys.IP_ADDRESS));
+        bindPreferenceSummaryToValue(findPreference(PreferenceKeys.MAC_ADDRESS));
     }
 
     /**
@@ -184,10 +193,12 @@ public class SettingsActivity extends PreferenceActivity {
                 if (stringValue.matches("\\d+\\.\\d+\\.\\d+\\.\\d+")) {
                     String macAddress = NetworkHelpers.GetMacFromArpCache(stringValue);
 
-                    if (macAddress == null)
-                        preference.setSummary(String.format("%s (MAC address unknown)", stringValue));
-                    else
-                        preference.setSummary(String.format("%s (%s)", stringValue, macAddress));
+                    preference.setSummary(stringValue);
+
+                    if (macAddress != null) {
+                        MacAddressPreference macAddressPreference = (MacAddressPreference) preference.getPreferenceManager().findPreference(PreferenceKeys.MAC_ADDRESS);
+                        macAddressPreference.setText(macAddress.toUpperCase());
+                    }
                 }
                 else {
                     preference.setSummary(String.format("%s (Unknown/invalid)", stringValue));
@@ -202,13 +213,13 @@ public class SettingsActivity extends PreferenceActivity {
             CharSequence[] deviceIdEntries = null;
             String authToken = "";
             String preferenceKey = preference.getKey();
-            if (preferenceKey.equals(AUTHENTICATION_TOKEN)) {
+            if (preferenceKey.equals(PreferenceKeys.AUTHENTICATION_TOKEN)) {
                 authToken = stringValue;
-                deviceIdPreference = (ListPreference) preference.getPreferenceManager().findPreference(DEVICE_ID);
+                deviceIdPreference = (ListPreference) preference.getPreferenceManager().findPreference(PreferenceKeys.DEVICE_ID);
                 deviceIdEntries = deviceIdPreference.getEntries();
             }
-            else if (preferenceKey.equals(DEVICE_ID)) {
-                EditTextPreference authTokenPreference = (EditTextPreference) preference.getPreferenceManager().findPreference(AUTHENTICATION_TOKEN);
+            else if (preferenceKey.equals(PreferenceKeys.DEVICE_ID)) {
+                EditTextPreference authTokenPreference = (EditTextPreference) preference.getPreferenceManager().findPreference(PreferenceKeys.AUTHENTICATION_TOKEN);
 
                 deviceIdPreference = (ListPreference) preference;
                 deviceIdEntries = deviceIdPreference.getEntries();
@@ -235,7 +246,7 @@ public class SettingsActivity extends PreferenceActivity {
                 }
 
                 // If authentication token changes, request list of devices again
-                if (preferenceKey.equals(AUTHENTICATION_TOKEN) && authToken.length() > 0) {
+                if (preferenceKey.equals(PreferenceKeys.AUTHENTICATION_TOKEN) && authToken.length() > 0) {
                     // HTTP Get
                     new InvokeSparkGetDevicesMethodTask(authToken).execute();
                 }
@@ -271,19 +282,11 @@ public class SettingsActivity extends PreferenceActivity {
      * activity is showing a two-pane settings UI.
      */
     @TargetApi(Build.VERSION_CODES.HONEYCOMB)
-    public class GeneralPreferenceFragment extends PreferenceFragment {
+    public static class GeneralPreferenceFragment extends PreferenceFragment {
         @Override
         public void onCreate(Bundle savedInstanceState) {
             super.onCreate(savedInstanceState);
             addPreferencesFromResource(R.xml.pref_general);
-
-            // Bind the summaries of EditText/List/Dialog/Ringtone preferences
-            // to their values. When their values change, their summaries are
-            // updated to reflect the new value, per the Android Design
-            // guidelines.
-            bindPreferenceSummaryToValue(findPreference(DEVICE_ID));
-            bindPreferenceSummaryToValue(findPreference(AUTHENTICATION_TOKEN));
-            bindPreferenceSummaryToValue(findPreference(IP_ADDRESS));
         }
     }
 }

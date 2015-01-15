@@ -68,10 +68,12 @@ public class MainActivity extends ActionBarActivity {
 
     public void onWakeComputerButtonClick(View view) {
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
-        String deviceId = sharedPreferences.getString("device_id", "");
-        String authenticationToken = sharedPreferences.getString("authentication_token", "");
-        String ipAddress = sharedPreferences.getString("ip_address", "");
-        String macAddress = NetworkHelpers.GetMacFromArpCache(ipAddress);
+        String deviceId = sharedPreferences.getString(PreferenceKeys.DEVICE_ID, "");
+        String authenticationToken = sharedPreferences.getString(PreferenceKeys.AUTHENTICATION_TOKEN, "");
+        String ipAddress = sharedPreferences.getString(PreferenceKeys.IP_ADDRESS, "");
+        String macAddress = sharedPreferences.getString(PreferenceKeys.MAC_ADDRESS, "");
+        if (macAddress == "")
+            macAddress = NetworkHelpers.GetMacFromArpCache(ipAddress);
 
         if (deviceId.length() == 0)
         {
@@ -88,13 +90,13 @@ public class MainActivity extends ActionBarActivity {
             Toast.makeText(this.getBaseContext(), "Target IP address not defined", Toast.LENGTH_LONG).show();
             return;
         }
-        if (macAddress.length() == 0)
+        if (macAddress == null || macAddress.length() == 0)
         {
             Toast.makeText(this.getBaseContext(), "Could not retrieve target MAC address", Toast.LENGTH_LONG).show();
             return;
         }
 
-        this.invokeSparkPostMethodTask = new InvokeSparkPostMethodTask("wakeHome", deviceId, authenticationToken, ipAddress, macAddress);
+        this.invokeSparkPostMethodTask = new InvokeSparkPostMethodTask("wakeHost", deviceId, authenticationToken, ipAddress, macAddress);
         this.invokeSparkPostMethodTask.execute();
     }
 
