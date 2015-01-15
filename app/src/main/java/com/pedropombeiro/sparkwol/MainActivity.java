@@ -13,13 +13,21 @@ import android.view.View;
 import android.widget.Toast;
 
 import org.apache.http.HttpResponse;
+import org.apache.http.NameValuePair;
 import org.apache.http.client.HttpClient;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.message.BasicNameValuePair;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 
 public class MainActivity extends ActionBarActivity {
@@ -60,19 +68,49 @@ public class MainActivity extends ActionBarActivity {
 
     public void onWakeComputerButtonClick(View view) {
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
-        this.invokeSparkPostMethodTask = new InvokeSparkPostMethodTask("wakeHome", sharedPreferences.getString("device_id", ""), sharedPreferences.getString("authentication_token", ""));
+        String deviceId = sharedPreferences.getString("device_id", "");
+        String authenticationToken = sharedPreferences.getString("authentication_token", "");
+        String ipAddress = sharedPreferences.getString("ip_address", "");
+        String macAddress = NetworkHelpers.GetMacFromArpCache(ipAddress);
+
+        if (deviceId.length() == 0)
+        {
+            Toast.makeText(this.getBaseContext(), "Target Spark device not defined", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (authenticationToken.length() == 0)
+        {
+            Toast.makeText(this.getBaseContext(), "Authentication token not defined", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (ipAddress.length() == 0)
+        {
+            Toast.makeText(this.getBaseContext(), "Target IP address not defined", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (macAddress.length() == 0)
+        {
+            Toast.makeText(this.getBaseContext(), "Could not retrieve target MAC address", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        this.invokeSparkPostMethodTask = new InvokeSparkPostMethodTask("wakeHome", deviceId, authenticationToken, ipAddress, macAddress);
         this.invokeSparkPostMethodTask.execute();
     }
 
     private class InvokeSparkPostMethodTask extends InvokeHttpMethodTaskBase {
         private final String method;
         private final String deviceId;
+        private final String ipAddress;
+        private final String macAddress;
 
-        public InvokeSparkPostMethodTask(String method, String deviceId, String authenticationToken) {
+        public InvokeSparkPostMethodTask(String method, String deviceId, String authenticationToken, String ipAddress, String macAddress) {
             super(authenticationToken);
 
             this.method = method;
             this.deviceId = deviceId;
+            this.ipAddress = ipAddress;
+            this.macAddress = macAddress;
         }
 
         @Override
@@ -89,7 +127,13 @@ public class MainActivity extends ActionBarActivity {
             try {
                 HttpClient httpclient = new DefaultHttpClient();
                 HttpPost request = new HttpPost(this.GetUrl());
+                request.setHeader("Accept", "application/json");
                 request.addHeader("Authorization", String.format("Bearer %s", this.authenticationToken));
+
+                List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>(1);
+
+                nameValuePairs.add(new BasicNameValuePair("args",String.format("%s;%s", this.ipAddress, this.macAddress)));
+                request.setEntity(new UrlEncodedFormEntity(nameValuePairs));
 
                 HttpResponse httpResponse = httpclient.execute(request);
 

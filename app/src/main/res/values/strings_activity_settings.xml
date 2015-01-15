@@ -11,4 +11,6 @@
     <string name="pref_device_no_devices_found">No Spark devices found</string>
 
     <string name="pref_authentication_token">Authentication token</string>
+
+    <string name="pref_ip_address">IP Address</string>
 </resources>

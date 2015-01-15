@@ -42,6 +42,7 @@ public class SettingsActivity extends PreferenceActivity {
     private static final boolean ALWAYS_SIMPLE_PREFS = false;
     private static final String AUTHENTICATION_TOKEN = "authentication_token";
     private static final String DEVICE_ID = "device_id";
+    private static final String IP_ADDRESS = "ip_address";
 
 
     @Override
@@ -105,11 +106,16 @@ public class SettingsActivity extends PreferenceActivity {
 
         // Add 'general' preferences.
         addPreferencesFromResource(R.xml.pref_general);
+        IPAddressPreference ipAddressPreference = new IPAddressPreference(this);
+        ipAddressPreference.setKey(IP_ADDRESS);
+        ipAddressPreference.setTitle(R.string.pref_ip_address);
+        getPreferenceScreen().addPreference(ipAddressPreference);
 
         // Bind the summaries of EditText/List/Dialog/Ringtone preferences to
         // their values. When their values change, their summaries are updated
         // to reflect the new value, per the Android Design guidelines.
         bindPreferenceSummaryToValue(findPreference(AUTHENTICATION_TOKEN));
+        bindPreferenceSummaryToValue(findPreference(IP_ADDRESS));
     }
 
     /**
@@ -174,6 +180,18 @@ public class SettingsActivity extends PreferenceActivity {
                                 ? listPreference.getEntries()[index]
                                 : null);
 
+            } else if (preference instanceof IPAddressPreference) {
+                if (stringValue.matches("\\d+\\.\\d+\\.\\d+\\.\\d+")) {
+                    String macAddress = NetworkHelpers.GetMacFromArpCache(stringValue);
+
+                    if (macAddress == null)
+                        preference.setSummary(String.format("%s (MAC address unknown)", stringValue));
+                    else
+                        preference.setSummary(String.format("%s (%s)", stringValue, macAddress));
+                }
+                else {
+                    preference.setSummary(String.format("%s (Unknown/invalid)", stringValue));
+                }
             } else {
                 // For all other preferences, set the summary to the value's
                 // simple string representation.
@@ -197,30 +215,30 @@ public class SettingsActivity extends PreferenceActivity {
                 authToken = authTokenPreference.getText();
             }
 
-            // update device list preference enabled state
-            deviceIdPreference.setEnabled(authToken.length() > 0 && deviceIdEntries != null && deviceIdEntries.length > 0);
+            if (deviceIdPreference != null) {
+                // update device list preference enabled state
+                deviceIdPreference.setEnabled(authToken.length() > 0 && deviceIdEntries != null && deviceIdEntries.length > 0);
 
-            // update device list preference summary
-            if (authToken.length() > 0) {
-                if (deviceIdPreference != null && deviceIdEntries != null) {
-                    if (deviceIdEntries.length > 0) {
-                        if (deviceIdPreference.getEntry() == null) {
-                            deviceIdPreference.setSummary(R.string.pref_device_select_device);
+                // update device list preference summary
+                if (authToken.length() > 0) {
+                    if (deviceIdPreference != null && deviceIdEntries != null) {
+                        if (deviceIdEntries.length > 0) {
+                            if (deviceIdPreference.getEntry() == null) {
+                                deviceIdPreference.setSummary(R.string.pref_device_select_device);
+                            }
+                        } else {
+                            deviceIdPreference.setSummary(R.string.pref_device_no_devices_found);
                         }
                     }
-                    else {
-                        deviceIdPreference.setSummary(R.string.pref_device_no_devices_found);
-                    }
+                } else {
+                    deviceIdPreference.setSummary("");
                 }
-            }
-            else {
-                deviceIdPreference.setSummary("");
-            }
 
-            // If authentication token changes, request list of devices again
-            if (preferenceKey.equals(AUTHENTICATION_TOKEN) && authToken.length() > 0) {
-                // HTTP Get
-                new InvokeSparkGetDevicesMethodTask(authToken).execute();
+                // If authentication token changes, request list of devices again
+                if (preferenceKey.equals(AUTHENTICATION_TOKEN) && authToken.length() > 0) {
+                    // HTTP Get
+                    new InvokeSparkGetDevicesMethodTask(authToken).execute();
+                }
             }
 
             return true;
@@ -265,6 +283,7 @@ public class SettingsActivity extends PreferenceActivity {
             // guidelines.
             bindPreferenceSummaryToValue(findPreference(DEVICE_ID));
             bindPreferenceSummaryToValue(findPreference(AUTHENTICATION_TOKEN));
+            bindPreferenceSummaryToValue(findPreference(IP_ADDRESS));
         }
     }
 }
