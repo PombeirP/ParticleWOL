@@ -323,6 +323,8 @@ public class MainActivity extends ActionBarActivity {
                 }
             } catch (JSONException e) {
                 Toast.makeText(getBaseContext(), "Could not retrieve status from Spark", Toast.LENGTH_LONG).show();
+                messageTextView.setText(String.format("Could not retrieve status from Spark"));
+                refreshButton.setVisibility(View.VISIBLE);
                 Log.w("FromOnPostExecute", e.getMessage());
             }
             finally {
