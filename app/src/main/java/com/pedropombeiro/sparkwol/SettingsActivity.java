@@ -197,9 +197,12 @@ public class SettingsActivity extends PreferenceActivity {
 
                     if (macAddress != null) {
                         macAddress = macAddress.toUpperCase();
-                        MacAddressPreference macAddressPreference = (MacAddressPreference) preference.getPreferenceManager().findPreference(PreferenceKeys.MAC_ADDRESS);
-                        if (!macAddress.equals("00:00:00:00:00:00"))
+
+                        if (!macAddress.equals("00:00:00:00:00:00")) {
+                            MacAddressPreference macAddressPreference = (MacAddressPreference) preference.getPreferenceManager().findPreference(PreferenceKeys.MAC_ADDRESS);
                             macAddressPreference.setText(macAddress);
+                            bindPreferenceSummaryToValue(macAddressPreference);
+                        }
                     }
                 }
                 else {
