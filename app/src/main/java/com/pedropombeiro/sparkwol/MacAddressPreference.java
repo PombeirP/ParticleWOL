@@ -16,7 +16,6 @@ public class MacAddressPreference extends EditTextPreference {
         super(context);
 
         getEditText().setInputType(InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
-        getEditText().setAllCaps(true);
         getEditText().setFilters(new InputFilter[]{new InputFilter() {
             @Override
             public CharSequence filter(CharSequence source, int start, int end, android.text.Spanned dest, int dstart, int dend) {
@@ -26,7 +25,7 @@ public class MacAddressPreference extends EditTextPreference {
                     if (!resultingTxt.matches("^[0-9A-F]{1,2}([:-]([0-9A-F]{1,2}([:-]([0-9A-F]{1,2}([:-]([0-9A-F]{1,2}([:-]([0-9A-F]{1,2}([:-]([0-9A-F]{1,2})?)?)?)?)?)?)?)?)?)?")) {
                         return "";
                     }
-                    return resultingTxt;
+                    return null;
                 }
                 return null;
             }
@@ -44,7 +43,7 @@ public class MacAddressPreference extends EditTextPreference {
                     String[] split = working.split(":");
                     String string = split[split.length - 1];
                     if (string.length() == 2) {
-                        s.append('-');
+                        s.append(':');
                         return;
                     }
                 }
