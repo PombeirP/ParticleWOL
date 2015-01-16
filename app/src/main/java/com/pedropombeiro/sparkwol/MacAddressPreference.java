@@ -23,7 +23,7 @@ public class MacAddressPreference extends EditTextPreference {
                 if (end > start) {
                     String destTxt = dest.toString();
                     String resultingTxt = (destTxt.substring(0, dstart) + source.subSequence(start, end) + destTxt.substring(dend)).toUpperCase();
-                    if (!resultingTxt.matches("^[0-9A-F]{1,2}(-([0-9A-F]{1,2}(-([0-9A-F]{1,2}(-([0-9A-F]{1,2}(-([0-9A-F]{1,2}(-([0-9A-F]{1,2})?)?)?)?)?)?)?)?)?)?")) {
+                    if (!resultingTxt.matches("^[0-9A-F]{1,2}([:-]([0-9A-F]{1,2}([:-]([0-9A-F]{1,2}([:-]([0-9A-F]{1,2}([:-]([0-9A-F]{1,2}([:-]([0-9A-F]{1,2})?)?)?)?)?)?)?)?)?)?")) {
                         return "";
                     }
                     return resultingTxt;
@@ -41,7 +41,7 @@ public class MacAddressPreference extends EditTextPreference {
             public void afterTextChanged(Editable s) {
                 if (!deleting) {
                     String working = s.toString();
-                    String[] split = working.split("-");
+                    String[] split = working.split(":");
                     String string = split[split.length - 1];
                     if (string.length() == 2) {
                         s.append('-');
