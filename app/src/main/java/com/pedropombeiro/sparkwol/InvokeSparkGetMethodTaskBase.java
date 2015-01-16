@@ -6,6 +6,8 @@ import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.params.HttpConnectionParams;
+import org.apache.http.params.HttpParams;
 
 import java.io.InputStream;
 
@@ -23,6 +25,10 @@ abstract class InvokeSparkGetMethodTaskBase extends InvokeHttpMethodTaskBase {
         try {
             // create HttpClient
             HttpClient httpclient = new DefaultHttpClient();
+            HttpParams httpParameters = httpclient.getParams();
+
+            HttpConnectionParams.setConnectionTimeout(httpParameters, 5000);
+            HttpConnectionParams.setSoTimeout(httpParameters, 10000);
 
             // make GET request to the given URL
             HttpGet request = new HttpGet(url);
