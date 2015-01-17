@@ -42,6 +42,7 @@ public class MainActivity extends ActionBarActivity {
     Button flashSparkButton;
     TextView messageTextView;
     ProgressBar progress;
+    private SparkDevice selectedSparkDevice;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,6 +56,18 @@ public class MainActivity extends ActionBarActivity {
         this.flashSparkButton = (Button) findViewById(R.id.flashSparkButton);
         this.messageTextView = (TextView) findViewById(R.id.messageTextView);
         this.progress = (ProgressBar) findViewById(R.id.progress);
+
+        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(getBaseContext());
+        sharedPreferences.registerOnSharedPreferenceChangeListener(new SharedPreferences.OnSharedPreferenceChangeListener() {
+            @Override
+            public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+                if (key == PreferenceKeys.DEVICE_ID || key == PreferenceKeys.AUTHENTICATION_TOKEN) {
+                    String deviceId = sharedPreferences.getString(PreferenceKeys.DEVICE_ID, "");
+                    String authenticationToken = sharedPreferences.getString(PreferenceKeys.AUTHENTICATION_TOKEN, "");
+                    retrieveSparkDevice(deviceId, authenticationToken);
+                }
+            }
+        });
 
         this.wakeComputerButton.setVisibility(View.INVISIBLE);
         UpdateUI();
@@ -79,6 +92,19 @@ public class MainActivity extends ActionBarActivity {
         this.sparkService = restAdapter.create(SparkService.class);
     }
 
+    String getSparkDeviceName() {
+        if (this.selectedSparkDevice != null)
+            return this.selectedSparkDevice.name;
+
+        return "Spark";
+    }
+
+    private void retrieveSparkDevice(String deviceId, String authenticationToken) {
+        if (authenticationToken != "" && deviceId != "") {
+            sparkService.getDevice(deviceId, new SetActiveDeviceCallback(deviceId));
+        }
+    }
+
     private void UpdateUI() {
         this.refreshButton.setVisibility(View.GONE);
 
@@ -87,10 +113,10 @@ public class MainActivity extends ActionBarActivity {
         String authenticationToken = sharedPreferences.getString(PreferenceKeys.AUTHENTICATION_TOKEN, "");
         if (authenticationToken != "" && deviceId != "")
         {
-            this.messageTextView.setText("Trying to connect to Spark...");
+            this.messageTextView.setText(String.format("Trying to connect to %s...", getSparkDeviceName()));
             this.progress.setVisibility(View.VISIBLE);
 
-            this.sparkService.getVariable("state", deviceId, new DetermineSparkStatusCallback());
+            this.retrieveSparkDevice(deviceId, authenticationToken);
         }
     }
 
@@ -175,7 +201,7 @@ public class MainActivity extends ActionBarActivity {
             bw.write(firmware);
             bw.close();
 
-            messageTextView.setText("Trying to connect to Spark...");
+            messageTextView.setText(String.format("Trying to connect to %s...", getSparkDeviceName()));
             progress.setVisibility(View.VISIBLE);
             flashSparkButton.setEnabled(false);
 
@@ -193,8 +219,8 @@ public class MainActivity extends ActionBarActivity {
 
                 @Override
                 public void failure(RetrofitError retrofitError) {
-                    Toast.makeText(getBaseContext(), "Could not flash the Spark", Toast.LENGTH_LONG).show();
-                    messageTextView.setText(String.format("Could not flash the Spark: %s", retrofitError.getResponse().getReason()));
+                    Toast.makeText(getBaseContext(), String.format("Could not flash %s", getSparkDeviceName()), Toast.LENGTH_LONG).show();
+                    messageTextView.setText(String.format("Could not flash the %s: %s", getSparkDeviceName(), retrofitError.getResponse().getReason()));
                     flashSparkButton.setVisibility(View.GONE);
                     refreshButton.setVisibility(View.VISIBLE);
                     progress.setVisibility(View.GONE);
@@ -233,7 +259,7 @@ public class MainActivity extends ActionBarActivity {
 
         @Override
         public void success(SparkVariable sparkVariable, Response response) {
-            messageTextView.setText("Spark is online.");
+            messageTextView.setText(String.format("%s is online.", getSparkDeviceName()));
             wakeComputerButton.setVisibility(View.VISIBLE);
             progress.setVisibility(View.GONE);
         }
@@ -243,15 +269,15 @@ public class MainActivity extends ActionBarActivity {
             progress.setVisibility(View.GONE);
 
             if (retrofitError.getResponse().getStatus() == 404) {
-                messageTextView.setText("Spark needs to be flashed with the WOL firmware.");
+                messageTextView.setText(String.format("%s needs to be flashed with the WOL firmware.", getSparkDeviceName()));
                 flashSparkButton.setEnabled(true);
                 flashSparkButton.setVisibility(View.VISIBLE);
                 refreshButton.setVisibility(View.GONE);
                 return;
             }
 
-            Toast.makeText(getBaseContext(), "Could not retrieve status from Spark", Toast.LENGTH_LONG).show();
-            messageTextView.setText(String.format("Could not retrieve status from Spark: %s", retrofitError.getResponse().getReason()));
+            Toast.makeText(getBaseContext(), String.format("Could not retrieve status from %s", getSparkDeviceName()), Toast.LENGTH_LONG).show();
+            messageTextView.setText(String.format("Could not retrieve status from %s: %s", getSparkDeviceName(), retrofitError.getResponse().getReason()));
             refreshButton.setVisibility(View.VISIBLE);
             Log.w("FromOnPostExecute", retrofitError.getMessage());
         }
@@ -283,7 +309,7 @@ public class MainActivity extends ActionBarActivity {
 
         @Override
         public void failure(RetrofitError retrofitError) {
-            Toast.makeText(getBaseContext(), "Could not retrieve status from Spark", Toast.LENGTH_LONG).show();
+            Toast.makeText(getBaseContext(), String.format("Could not retrieve status from %s", getSparkDeviceName()), Toast.LENGTH_LONG).show();
             Log.w("FromOnPostExecute", retrofitError.getMessage());
 
             messageTextView.setText("");
@@ -317,7 +343,7 @@ public class MainActivity extends ActionBarActivity {
                 }
                 case "Unreachable":
                     Toast.makeText(getBaseContext(), "Target machine is unreachable", Toast.LENGTH_LONG).show();
-                    messageTextView.setText("Could not contact the target machine :-(");
+                    messageTextView.setText(String.format("%s could not contact the target machine :-(", getSparkDeviceName()));
                     wakeComputerButton.setVisibility(View.VISIBLE);
                     progress.setVisibility(View.GONE);
                     break;
@@ -332,12 +358,34 @@ public class MainActivity extends ActionBarActivity {
 
         @Override
         public void failure(RetrofitError retrofitError) {
-            Toast.makeText(getBaseContext(), "Could not retrieve status from Spark", Toast.LENGTH_LONG).show();
+            Toast.makeText(getBaseContext(), String.format("Could not retrieve status from %s", getSparkDeviceName()), Toast.LENGTH_LONG).show();
             Log.w("FromOnPostExecute", retrofitError.getMessage());
 
-            messageTextView.setText(String.format("Could not retrieve status from Spark:\n%s", retrofitError.getResponse().getReason()));
+            messageTextView.setText(String.format("Could not retrieve status from %s:\n%s", getSparkDeviceName(), retrofitError.getResponse().getReason()));
             wakeComputerButton.setEnabled(true);
             progress.setVisibility(View.GONE);
+        }
+    }
+
+    private class SetActiveDeviceCallback implements Callback<SparkDevice> {
+        private final String deviceId;
+
+        public SetActiveDeviceCallback(String deviceId) {
+
+            this.deviceId = deviceId;
+        }
+
+        @Override
+        public void success(SparkDevice sparkDevice, Response response) {
+            selectedSparkDevice = sparkDevice;
+            messageTextView.setText(String.format("Connected to %s", getSparkDeviceName()));
+            sparkService.getVariable("state", deviceId, new DetermineSparkStatusCallback());
+            flashSparkButton.setText(String.format("Flash %s", getSparkDeviceName()));
+        }
+
+        @Override
+        public void failure(RetrofitError retrofitError) {
+
         }
     }
 }

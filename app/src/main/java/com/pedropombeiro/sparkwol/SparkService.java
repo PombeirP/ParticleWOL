@@ -22,6 +22,9 @@ public interface SparkService {
     @GET("/v1/devices")
     void getDevices(Callback<List<SparkDevice>> callback);
 
+    @GET("/v1/devices/{deviceId}")
+    void getDevice(@Path("deviceId") String deviceId, Callback<SparkDevice> callback);
+
     @GET("/v1/devices/{deviceId}/{variable}")
     void getVariable(@Path("variable") String variable, @Path("deviceId") String deviceId, Callback<SparkVariable> callback);
 
