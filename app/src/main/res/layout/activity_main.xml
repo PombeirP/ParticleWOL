@@ -33,6 +33,16 @@
         android:onClick="onRefreshButtonClick"
         android:visibility="gone"/>
 
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Flash Spark"
+        android:id="@+id/flashSparkButton"
+        android:layout_centerVertical="true"
+        android:layout_centerHorizontal="true"
+        android:onClick="onFlashSparkButtonClick"
+        android:visibility="gone"/>
+
     <ProgressBar
         android:id="@+id/progress"
         android:layout_width="wrap_content"

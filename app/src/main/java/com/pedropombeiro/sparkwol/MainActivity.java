@@ -2,7 +2,6 @@ package com.pedropombeiro.sparkwol;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.preference.PreferenceManager;
@@ -16,38 +15,44 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import org.apache.http.HttpResponse;
-import org.apache.http.NameValuePair;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.entity.UrlEncodedFormEntity;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.impl.client.DefaultHttpClient;
-import org.apache.http.message.BasicNameValuePair;
-import org.json.JSONException;
-import org.json.JSONObject;
-
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.List;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.io.StringWriter;
+import java.io.Writer;
+
+import retrofit.Callback;
+import retrofit.RequestInterceptor;
+import retrofit.RestAdapter;
+import retrofit.RetrofitError;
+import retrofit.client.Response;
+import retrofit.mime.TypedFile;
 
 
 public class MainActivity extends ActionBarActivity {
-
-    private InvokeSparkPostMethodTask invokeSparkPostMethodTask;
+    SparkService sparkService;
 
     Button wakeComputerButton;
     Button refreshButton;
+    Button flashSparkButton;
     TextView messageTextView;
     ProgressBar progress;
-    private AsyncTask<String, Void, String> testSparkDeviceStatusTask;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        this.createSparkService();
+
         this.wakeComputerButton = (Button) findViewById(R.id.wakeComputerButton);
         this.refreshButton = (Button) findViewById(R.id.refreshButton);
+        this.flashSparkButton = (Button) findViewById(R.id.flashSparkButton);
         this.messageTextView = (TextView) findViewById(R.id.messageTextView);
         this.progress = (ProgressBar) findViewById(R.id.progress);
 
@@ -55,17 +60,38 @@ public class MainActivity extends ActionBarActivity {
         UpdateUI();
     }
 
+    private void createSparkService() {
+        RequestInterceptor requestInterceptor = new RequestInterceptor() {
+            @Override
+            public void intercept(RequestFacade request) {
+                SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(getBaseContext());
+                String authenticationToken = sharedPreferences.getString(PreferenceKeys.AUTHENTICATION_TOKEN, "");
+
+                if (authenticationToken != "")
+                    request.addHeader("Authorization", String.format("Bearer %s", authenticationToken));
+            }
+        };
+        RestAdapter restAdapter = new RestAdapter.Builder()
+                .setLogLevel(RestAdapter.LogLevel.FULL)
+                .setEndpoint("https://api.spark.io")
+                .setRequestInterceptor(requestInterceptor)
+                .build();
+        this.sparkService = restAdapter.create(SparkService.class);
+    }
+
     private void UpdateUI() {
         this.refreshButton.setVisibility(View.GONE);
-
-        if (this.testSparkDeviceStatusTask != null && !testSparkDeviceStatusTask.isCancelled())
-            this.testSparkDeviceStatusTask.cancel(true);
 
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
         String deviceId = sharedPreferences.getString(PreferenceKeys.DEVICE_ID, "");
         String authenticationToken = sharedPreferences.getString(PreferenceKeys.AUTHENTICATION_TOKEN, "");
         if (authenticationToken != "" && deviceId != "")
-            this.testSparkDeviceStatusTask = new TestSparkDeviceStatusTask(deviceId, authenticationToken).execute();
+        {
+            this.messageTextView.setText("Trying to connect to Spark...");
+            this.progress.setVisibility(View.VISIBLE);
+
+            this.sparkService.getVariable("state", deviceId, new DetermineSparkStatusCallback());
+        }
     }
 
 
@@ -96,7 +122,7 @@ public class MainActivity extends ActionBarActivity {
 
     public void onWakeComputerButtonClick(View view) {
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
-        String deviceId = sharedPreferences.getString(PreferenceKeys.DEVICE_ID, "");
+        final String deviceId = sharedPreferences.getString(PreferenceKeys.DEVICE_ID, "");
         String authenticationToken = sharedPreferences.getString(PreferenceKeys.AUTHENTICATION_TOKEN, "");
         String ipAddress = sharedPreferences.getString(PreferenceKeys.IP_ADDRESS, "");
         String macAddress = sharedPreferences.getString(PreferenceKeys.MAC_ADDRESS, "");
@@ -120,216 +146,198 @@ public class MainActivity extends ActionBarActivity {
             return;
         }
 
-        this.invokeSparkPostMethodTask = new InvokeSparkPostMethodTask("wakeHost", deviceId, authenticationToken, ipAddress, macAddress);
-        this.invokeSparkPostMethodTask.execute();
+        this.sparkService.invokeFunction(deviceId, "wakeHost", String.format("%s;%s", ipAddress, macAddress), new WakeUpMachineCallback(deviceId));
     }
 
     public void onRefreshButtonClick(View view) {
         this.UpdateUI();
     }
 
-    private class InvokeSparkPostMethodTask extends InvokeHttpMethodTaskBase {
-        private final String method;
-        private final String deviceId;
-        private final String ipAddress;
-        private final String macAddress;
+    public void onFlashSparkButtonClick(View view) {
+        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
+        String deviceId = sharedPreferences.getString(PreferenceKeys.DEVICE_ID, "");
+        String authenticationToken = sharedPreferences.getString(PreferenceKeys.AUTHENTICATION_TOKEN, "");
 
-        public InvokeSparkPostMethodTask(String method, String deviceId, String authenticationToken, String ipAddress, String macAddress) {
-            super(authenticationToken);
-
-            this.method = method;
-            this.deviceId = deviceId;
-            this.ipAddress = ipAddress;
-            this.macAddress = macAddress;
+        if (deviceId.length() == 0) {
+            Toast.makeText(this.getBaseContext(), "Target Spark device not defined", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (authenticationToken.length() == 0) {
+            Toast.makeText(this.getBaseContext(), "Authentication token not defined", Toast.LENGTH_LONG).show();
+            return;
         }
 
-        @Override
-        protected String GetUrl() {
-            return String.format("https://api.spark.io/v1/devices/%s/%s", this.deviceId, this.method);
-        }
+        try {
+            String firmware = convertStreamToString(getResources().openRawResource(R.raw.sparkscript));
+            File firmwareFile = getBaseContext().getCacheDir().createTempFile("spark", "firmware");
+            firmwareFile.deleteOnExit();
+            BufferedWriter bw = new BufferedWriter(new FileWriter(firmwareFile));
+            bw.write(firmware);
+            bw.close();
 
-        @Override
-        protected String doInBackground(String... params) {
-            InputStream inputStream = null;
-            String result = "";
+            messageTextView.setText("Trying to connect to Spark...");
+            progress.setVisibility(View.VISIBLE);
+            flashSparkButton.setEnabled(false);
 
-            // HTTP Post
-            try {
-                HttpClient httpclient = new DefaultHttpClient();
-                HttpPost request = new HttpPost(this.GetUrl());
-                request.setHeader("Accept", "application/json");
-                request.addHeader("Authorization", String.format("Bearer %s", this.authenticationToken));
-
-                List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>(1);
-
-                nameValuePairs.add(new BasicNameValuePair("args", String.format("%s;%s", this.ipAddress, this.macAddress)));
-                request.setEntity(new UrlEncodedFormEntity(nameValuePairs));
-
-                HttpResponse httpResponse = httpclient.execute(request);
-
-                // receive response as inputStream
-                inputStream = httpResponse.getEntity().getContent();
-
-                if (inputStream != null)
-                    result = convertInputStreamToString(inputStream);
-                else
-                    result = "Did not work!";
-            } catch (Exception e) {
-                System.out.println(e.getMessage());
-                return e.getMessage();
-            }
-            return result;
-        }
-
-        @Override
-        protected void onPostExecute(String result) {
-            try {
-                JSONObject response = new JSONObject(result);
-                if (response.has("code")) {
-                    int code = response.getInt("code");
-                    if (code >= 400) {
-                        Toast.makeText(getBaseContext(), String.format("Couldn't send wake request:\n%s", response.getString("error_description")), Toast.LENGTH_LONG).show();
-                        Log.i("FromOnPostExecute", result);
-                        return;
+            this.sparkService.flashFirmware(new TypedFile("text/plain", firmwareFile), deviceId, new Callback<UploadSparkFirmwareResponse>() {
+                @Override
+                public void success(UploadSparkFirmwareResponse sparkResponse, Response response) {
+                    try {
+                        messageTextView.setText(sparkResponse.status);
+                        //UpdateUI();
+                    }
+                    finally {
+                        progress.setVisibility(View.GONE);
                     }
                 }
-            } catch (JSONException e) {
-                e.printStackTrace();
+
+                @Override
+                public void failure(RetrofitError retrofitError) {
+                    Toast.makeText(getBaseContext(), "Could not flash the Spark", Toast.LENGTH_LONG).show();
+                    messageTextView.setText(String.format("Could not flash the Spark: %s", retrofitError.getResponse().getReason()));
+                    flashSparkButton.setVisibility(View.GONE);
+                    refreshButton.setVisibility(View.VISIBLE);
+                    progress.setVisibility(View.GONE);
+                    Log.w("FromOnPostExecute", retrofitError.getMessage());
+                }
+            });
+        }
+        catch (Exception e) {
+            Log.e("onFlashSparkButtonClick", e.getMessage());
+        }
+    }
+
+    private String convertStreamToString(InputStream is) throws IOException {
+        if (is != null) {
+            Writer writer = new StringWriter();
+
+            char[] buffer = new char[1024];
+            try {
+                Reader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
+                int n;
+                while ((n = reader.read(buffer)) != -1) {
+                    writer.write(buffer, 0, n);
+                }
+            } finally {
+                is.close();
+            }
+            return writer.toString();
+        } else {
+            return "";
+        }
+    }
+
+    private class DetermineSparkStatusCallback implements Callback<SparkVariable> {
+        public DetermineSparkStatusCallback() {
+        }
+
+        @Override
+        public void success(SparkVariable sparkVariable, Response response) {
+            messageTextView.setText("Spark is online.");
+            wakeComputerButton.setVisibility(View.VISIBLE);
+            progress.setVisibility(View.GONE);
+        }
+
+        @Override
+        public void failure(RetrofitError retrofitError) {
+            progress.setVisibility(View.GONE);
+
+            if (retrofitError.getResponse().getStatus() == 404) {
+                messageTextView.setText("Spark needs to be flashed with the WOL firmware.");
+                flashSparkButton.setEnabled(true);
+                flashSparkButton.setVisibility(View.VISIBLE);
+                refreshButton.setVisibility(View.GONE);
                 return;
             }
 
-            Toast.makeText(getBaseContext(), "Sent wake request", Toast.LENGTH_LONG).show();
-            Log.i("FromOnPostExecute", result);
-
-            Runnable getStateVariableRunnable = new Runnable() {
-                @Override
-                public void run() {
-                    new InvokeSparkGetStateVariableMethodTask(deviceId, authenticationToken).execute();
-                }
-            };
-
-            Handler handler = new Handler();
-            handler.postDelayed(getStateVariableRunnable, 2000);
+            Toast.makeText(getBaseContext(), "Could not retrieve status from Spark", Toast.LENGTH_LONG).show();
+            messageTextView.setText(String.format("Could not retrieve status from Spark: %s", retrofitError.getResponse().getReason()));
+            refreshButton.setVisibility(View.VISIBLE);
+            Log.w("FromOnPostExecute", retrofitError.getMessage());
         }
     }
 
-    private class InvokeSparkGetStateVariableMethodTask extends InvokeSparkGetMethodTaskBase {
-        private String deviceId;
+    private class WakeUpMachineCallback implements Callback<Response> {
+        private final String deviceId;
 
-        public InvokeSparkGetStateVariableMethodTask(String deviceId, String authToken) {
-            super(authToken);
-            this.deviceId = deviceId;
-        }
-
-        @Override
-        protected String GetUrl() {
-            return String.format("https://api.spark.io/v1/devices/%s/state", this.deviceId);
-        }
-
-        // onPostExecute displays the results of the AsyncTask.
-        @Override
-        protected void onPostExecute(String result) {
-            try {
-                JSONObject response = new JSONObject(result);
-                if (response.has("code")) {
-                    int code = response.getInt("code");
-                    if (code >= 400) {
-                        Toast.makeText(getBaseContext(), String.format("Could not retrieve status from Spark:\n%s", response.getString("error_description")), Toast.LENGTH_LONG).show();
-                        Log.i("FromOnPostExecute", result);
-                        return;
-                    }
-                }
-
-                String state = response.getString("result");
-                switch (state) {
-                    case "Sent WOL":
-                    case "Pinging": {
-                        Runnable runnable = new Runnable() {
-                            @Override
-                            public void run() {
-                                new InvokeSparkGetStateVariableMethodTask(deviceId, authenticationToken).execute();
-                            }
-                        };
-
-                        Handler handler = new Handler();
-                        handler.postDelayed(runnable, 2000);
-                        break;
-                    }
-                    case "Unreachable":
-                        Toast.makeText(getBaseContext(), "Could not contact the target machine :-(", Toast.LENGTH_LONG).show();
-                        break;
-                    case "Reachable":
-                        Toast.makeText(getBaseContext(), "Machine is awake!", Toast.LENGTH_LONG).show();
-                        break;
-                }
-            } catch (JSONException e) {
-                Toast.makeText(getBaseContext(), "Could not retrieve status from Spark", Toast.LENGTH_LONG).show();
-                Log.w("FromOnPostExecute", e.getMessage());
-            }
-        }
-    }
-
-    private class TestSparkDeviceStatusTask extends InvokeSparkGetMethodTaskBase {
-        private String deviceId;
-
-        public TestSparkDeviceStatusTask(String deviceId, String authToken) {
-            super(authToken);
+        public WakeUpMachineCallback(String deviceId) {
             this.deviceId = deviceId;
 
-            messageTextView.setText("Trying to connect to Spark...");
+            messageTextView.setText("Waking up machine...");
+            wakeComputerButton.setVisibility(View.INVISIBLE);
             progress.setVisibility(View.VISIBLE);
         }
 
         @Override
-        protected String GetUrl() {
-            return String.format("https://api.spark.io/v1/devices/%s/state", this.deviceId);
+        public void success(Response sparkVariable, Response response) {
+            Runnable runnable = new Runnable() {
+                @Override
+                public void run() {
+                    sparkService.getVariable("state", deviceId, new WaitForMachineToWakeUpCallback(deviceId));
+                }
+            };
+
+            Handler handler = new Handler();
+            handler.postDelayed(runnable, 2000);
         }
 
-        // onPostExecute displays the results of the AsyncTask.
         @Override
-        protected void onPostExecute(String result) {
-            try {
-                JSONObject response = new JSONObject(result);
-                if (response.has("code")) {
-                    int code = response.getInt("code");
-                    if (code >= 400) {
-                        messageTextView.setText(String.format("Could not retrieve status from Spark:\n%s", response.getString("error_description")));
-                        refreshButton.setVisibility(View.VISIBLE);
-                        Log.i("FromOnPostExecute", result);
-                        return;
-                    }
-                }
-                if (response.has("error")) {
-                    Log.i("FromOnPostExecute", result);
+        public void failure(RetrofitError retrofitError) {
+            Toast.makeText(getBaseContext(), "Could not retrieve status from Spark", Toast.LENGTH_LONG).show();
+            Log.w("FromOnPostExecute", retrofitError.getMessage());
 
-                    String error = response.getString("error");
-                    if (error.equals("Variable not found")) {
-                        messageTextView.setText("Spark needs to be flashed with the WOL firmware.");
-                    }
-                    else {
-                        messageTextView.setText(String.format("Could not retrieve status from Spark:\n%s", error));
-                    }
-                    refreshButton.setVisibility(View.VISIBLE);
-                    return;
-                }
+            messageTextView.setText("");
+            wakeComputerButton.setVisibility(View.VISIBLE);
+            progress.setVisibility(View.GONE);
+        }
+    }
 
-                if (response.has("result")) {
-                    messageTextView.setText("Spark is online.");
+    private class WaitForMachineToWakeUpCallback implements Callback<SparkVariable> {
+        private final String deviceId;
+
+        public WaitForMachineToWakeUpCallback(String deviceId) {
+            this.deviceId = deviceId;
+        }
+
+        @Override
+        public void success(SparkVariable sparkVariable, Response response) {
+            switch (sparkVariable.result) {
+                case "Sent WOL":
+                case "Pinging": {
+                    Runnable runnable = new Runnable() {
+                        @Override
+                        public void run() {
+                            sparkService.getVariable("state", deviceId, new WaitForMachineToWakeUpCallback(deviceId));
+                        }
+                    };
+
+                    Handler handler = new Handler();
+                    handler.postDelayed(runnable, 2000);
+                    break;
+                }
+                case "Unreachable":
+                    Toast.makeText(getBaseContext(), "Target machine is unreachable", Toast.LENGTH_LONG).show();
+                    messageTextView.setText("Could not contact the target machine :-(");
                     wakeComputerButton.setVisibility(View.VISIBLE);
-                }
-                else {
-                    messageTextView.setText("Spark needs to be flashed with the WOL firmware.");
-                    refreshButton.setVisibility(View.VISIBLE);
-                }
-            } catch (JSONException e) {
-                Toast.makeText(getBaseContext(), "Could not retrieve status from Spark", Toast.LENGTH_LONG).show();
-                messageTextView.setText(String.format("Could not retrieve status from Spark"));
-                refreshButton.setVisibility(View.VISIBLE);
-                Log.w("FromOnPostExecute", e.getMessage());
+                    progress.setVisibility(View.GONE);
+                    break;
+                case "Reachable":
+                    Toast.makeText(getBaseContext(), "Machine is awake!", Toast.LENGTH_LONG).show();
+                    messageTextView.setText("Machine is awake!");
+                    wakeComputerButton.setVisibility(View.VISIBLE);
+                    progress.setVisibility(View.GONE);
+                    break;
             }
-            finally {
-                progress.setVisibility(View.GONE);
-            }
+        }
+
+        @Override
+        public void failure(RetrofitError retrofitError) {
+            Toast.makeText(getBaseContext(), "Could not retrieve status from Spark", Toast.LENGTH_LONG).show();
+            Log.w("FromOnPostExecute", retrofitError.getMessage());
+
+            messageTextView.setText(String.format("Could not retrieve status from Spark:\n%s", retrofitError.getResponse().getReason()));
+            wakeComputerButton.setEnabled(true);
+            progress.setVisibility(View.GONE);
         }
     }
 }

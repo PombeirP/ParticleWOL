@@ -2,6 +2,7 @@ package com.pedropombeiro.sparkwol;
 
 import android.annotation.TargetApi;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.os.Build;
 import android.os.Bundle;
@@ -14,12 +15,14 @@ import android.preference.PreferenceManager;
 import android.util.Log;
 import android.widget.Toast;
 
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
-
 import java.util.ArrayList;
 import java.util.List;
+
+import retrofit.Callback;
+import retrofit.RequestInterceptor;
+import retrofit.RestAdapter;
+import retrofit.RetrofitError;
+import retrofit.client.Response;
 
 /**
  * A {@link PreferenceActivity} that presents a set of application settings. On
@@ -40,51 +43,26 @@ public class SettingsActivity extends PreferenceActivity {
      * shown on tablets.
      */
     private static final boolean ALWAYS_SIMPLE_PREFS = false;
+    private SparkService sparkService;
+    private AuthorizationTokenRequestInterceptor requestInterceptor;
 
     @Override
     protected void onPostCreate(Bundle savedInstanceState) {
         super.onPostCreate(savedInstanceState);
 
+        createSparkService();
+
         setupSimplePreferencesScreen();
     }
 
-    private class InvokeSparkGetDevicesMethodTask extends InvokeSparkGetMethodTaskBase {
-        public InvokeSparkGetDevicesMethodTask(String authToken)
-        {
-            super(authToken);
-        }
-
-        @Override
-        protected String GetUrl() {
-            return "https://api.spark.io/v1/devices";
-        }
-
-        // onPostExecute displays the results of the AsyncTask.
-        @Override
-        protected void onPostExecute(String result) {
-            try {
-                JSONArray deviceArray = new JSONArray(result);
-                List<String> entries = new ArrayList<String>(deviceArray.length());
-                List<String> entryValues = new ArrayList<String>(deviceArray.length());
-
-                for (int i = 0; i < deviceArray.length(); ++i) {
-                    JSONObject device = deviceArray.getJSONObject(i);
-                    entries.add(device.getString("name"));
-                    entryValues.add(device.getString("id"));
-                }
-
-                ListPreference deviceIdPreference = (ListPreference) findPreference(PreferenceKeys.DEVICE_ID);
-                deviceIdPreference.setEntries(entries.toArray(new String[entries.size()]));
-                deviceIdPreference.setEntryValues(entryValues.toArray(new String[entryValues.size()]));
-
-                bindPreferenceSummaryToValue(deviceIdPreference);
-            }
-            catch (JSONException e)
-            {
-                Toast.makeText(getBaseContext(), "Error requesting Spark device list", Toast.LENGTH_LONG).show();
-                Log.w("FromOnPostExecute", e.getMessage());
-            }
-        }
+    private void createSparkService() {
+        this.requestInterceptor = new AuthorizationTokenRequestInterceptor();
+        RestAdapter restAdapter = new RestAdapter.Builder()
+                .setLogLevel(RestAdapter.LogLevel.FULL)
+                .setEndpoint("https://api.spark.io")
+                .setRequestInterceptor(this.requestInterceptor)
+                .build();
+        this.sparkService = restAdapter.create(SparkService.class);
     }
 
     /**
@@ -252,8 +230,30 @@ public class SettingsActivity extends PreferenceActivity {
 
                 // If authentication token changes, request list of devices again
                 if (preferenceKey.equals(PreferenceKeys.AUTHENTICATION_TOKEN) && authToken.length() > 0) {
-                    // HTTP Get
-                    new InvokeSparkGetDevicesMethodTask(authToken).execute();
+                    requestInterceptor.setAuthorizationToken(authToken);
+                    sparkService.getDevices(new Callback<List<SparkDevice>>() {
+                        @Override
+                        public void success(List<SparkDevice> sparkDevices, Response response) {
+                            ListPreference deviceIdPreference = (ListPreference) findPreference(PreferenceKeys.DEVICE_ID);
+                            ArrayList<String> entries = new ArrayList<String>(sparkDevices.size());
+                            ArrayList<String> entryValues = new ArrayList<String>(sparkDevices.size());
+
+                            for (int i = 0; i < sparkDevices.size(); ++i) {
+                                entries.add(sparkDevices.get(i).name);
+                                entryValues.add(sparkDevices.get(i).id);
+                            }
+                            deviceIdPreference.setEntries(entries.toArray(new String[entries.size()]));
+                            deviceIdPreference.setEntryValues(entryValues.toArray(new String[entryValues.size()]));
+
+                            bindPreferenceSummaryToValue(deviceIdPreference);
+                        }
+
+                        @Override
+                        public void failure(RetrofitError retrofitError) {
+                            Toast.makeText(getBaseContext(), "Error requesting Spark device list", Toast.LENGTH_LONG).show();
+                            Log.w("FromOnPostExecute", retrofitError.getMessage());
+                        }
+                    });
                 }
             }
 
@@ -292,6 +292,20 @@ public class SettingsActivity extends PreferenceActivity {
         public void onCreate(Bundle savedInstanceState) {
             super.onCreate(savedInstanceState);
             addPreferencesFromResource(R.xml.pref_general);
+        }
+    }
+
+    private class AuthorizationTokenRequestInterceptor implements RequestInterceptor {
+        private String authorizationToken = "";
+
+        public void setAuthorizationToken(String authorizationToken) {
+            this.authorizationToken = authorizationToken;
+        }
+
+        @Override
+        public void intercept(RequestFacade request) {
+            if (this.authorizationToken != "")
+                request.addHeader("Authorization", String.format("Bearer %s", this.authorizationToken));
         }
     }
 }
