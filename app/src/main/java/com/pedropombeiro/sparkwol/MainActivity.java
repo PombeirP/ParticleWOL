@@ -30,7 +30,9 @@ import retrofit.Callback;
 import retrofit.RequestInterceptor;
 import retrofit.RestAdapter;
 import retrofit.RetrofitError;
+import retrofit.client.Request;
 import retrofit.client.Response;
+import retrofit.client.UrlConnectionClient;
 import retrofit.mime.TypedFile;
 
 
@@ -41,11 +43,14 @@ public class MainActivity extends ActionBarActivity {
     Button flashSparkButton;
     TextView messageTextView;
     ProgressBar progress;
-    private SparkDevice selectedSparkDevice;
-    private boolean isRefreshActionVisible = true;
+    SparkDevice selectedSparkDevice;
+    boolean isRefreshActionVisible = true;
+    boolean isInForeground;
 
     enum State {
         Invalid,
+        SparkNotConfigured,
+        TargetHostNotConfigured,
         NoConnectionToSpark,
         TestingConnectionToSpark,
         SparkNotFlashed,
@@ -68,20 +73,23 @@ public class MainActivity extends ActionBarActivity {
         this.messageTextView = (TextView) findViewById(R.id.messageTextView);
         this.progress = (ProgressBar) findViewById(R.id.progress);
 
-        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(getBaseContext());
-        sharedPreferences.registerOnSharedPreferenceChangeListener(new SharedPreferences.OnSharedPreferenceChangeListener() {
-            @Override
-            public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
-                if (key == PreferenceKeys.DEVICE_ID || key == PreferenceKeys.AUTHENTICATION_TOKEN) {
-                    String deviceId = sharedPreferences.getString(PreferenceKeys.DEVICE_ID, "");
-                    String authenticationToken = sharedPreferences.getString(PreferenceKeys.AUTHENTICATION_TOKEN, "");
-                    retrieveSparkDevice(deviceId, authenticationToken);
-                }
-            }
-        });
+        this.testConnectionToSparkDevice();
+    }
 
-        this.wakeComputerButton.setVisibility(View.INVISIBLE);
-        testConnectionToSparkDevice();
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        this.isInForeground = true;
+
+        this.testConnectionToSparkDevice();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+
+        this.isInForeground = false;
     }
 
     @Override
@@ -115,6 +123,16 @@ public class MainActivity extends ActionBarActivity {
         return super.onOptionsItemSelected(item);
     }
 
+    private void displayToast(String toastText) {
+        this.displayToast(toastText, true);
+    }
+
+    private void displayToast(String toastText, boolean onlyWhenInactive) {
+        if(!onlyWhenInactive || !this.isInForeground) {
+            Toast.makeText(this.getBaseContext(), toastText, Toast.LENGTH_LONG).show();
+        }
+    }
+
     public void onWakeComputerButtonClick(View view) {
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
         final String deviceId = sharedPreferences.getString(PreferenceKeys.DEVICE_ID, "");
@@ -125,23 +143,23 @@ public class MainActivity extends ActionBarActivity {
             macAddress = NetworkHelpers.GetMacFromArpCache(ipAddress);
 
         if (deviceId.length() == 0) {
-            Toast.makeText(this.getBaseContext(), "Target Spark device not defined", Toast.LENGTH_LONG).show();
+            this.displayToast("Target Spark device not defined", false);
             return;
         }
         if (authenticationToken.length() == 0) {
-            Toast.makeText(this.getBaseContext(), "Authentication token not defined", Toast.LENGTH_LONG).show();
+            this.displayToast("Authentication token not defined", false);
             return;
         }
         if (ipAddress.length() == 0) {
-            Toast.makeText(this.getBaseContext(), "Target IP address not defined", Toast.LENGTH_LONG).show();
+            this.displayToast("Target computer IP address not defined", false);
             return;
         }
         if (macAddress == null || macAddress.length() == 0) {
-            Toast.makeText(this.getBaseContext(), "Could not retrieve target MAC address", Toast.LENGTH_LONG).show();
+            this.displayToast("Could not retrieve target computer MAC address", false);
             return;
         }
 
-        this.sparkService.invokeFunction(deviceId, "wakeHost", String.format("%s;%s", ipAddress, macAddress), new WakeUpMachineCallback(deviceId));
+        this.sparkService.invokeFunction(deviceId, "wakeHost", String.format("%s;%s", ipAddress, macAddress), new WakeUpHostCallback(deviceId));
     }
 
     public void onFlashSparkButtonClick(View view) {
@@ -150,11 +168,11 @@ public class MainActivity extends ActionBarActivity {
         String authenticationToken = sharedPreferences.getString(PreferenceKeys.AUTHENTICATION_TOKEN, "");
 
         if (deviceId.length() == 0) {
-            Toast.makeText(this.getBaseContext(), "Target Spark device not defined", Toast.LENGTH_LONG).show();
+            this.displayToast("Spark device not defined", false);
             return;
         }
         if (authenticationToken.length() == 0) {
-            Toast.makeText(this.getBaseContext(), "Authentication token not defined", Toast.LENGTH_LONG).show();
+            this.displayToast("Authentication token not defined", false);
             return;
         }
 
@@ -166,26 +184,19 @@ public class MainActivity extends ActionBarActivity {
             bw.write(firmware);
             bw.close();
 
-            messageTextView.setText(String.format("Trying to connect to %s...", getSparkDeviceName()));
-            this.setCurrentState(State.FlashingSpark);
+            this.setCurrentState(State.FlashingSpark, String.format("Trying to connect to %s...", getSparkDeviceName()));
 
             this.sparkService.flashFirmware(new TypedFile("text/plain", firmwareFile), deviceId, new Callback<UploadSparkFirmwareResponse>() {
                 @Override
                 public void success(UploadSparkFirmwareResponse sparkResponse, Response response) {
-                    try {
-                        messageTextView.setText(sparkResponse.status);
-                        testConnectionToSparkDevice();
-                    }
-                    finally {
-                        progress.setVisibility(View.GONE);
-                    }
+                    messageTextView.setText(sparkResponse.status);
+                    testConnectionToSparkDevice();
                 }
 
                 @Override
                 public void failure(RetrofitError retrofitError) {
-                    Toast.makeText(getBaseContext(), String.format("Could not flash %s", getSparkDeviceName()), Toast.LENGTH_LONG).show();
-                    messageTextView.setText(String.format("Could not flash the %s: %s", getSparkDeviceName(), retrofitError.getResponse().getReason()));
-                    setCurrentState(State.ConnectedToSpark);
+                    displayToast(String.format("Could not flash %s", getSparkDeviceName()));
+                    setCurrentState(State.ConnectedToSpark, String.format("Could not flash the %s: %s", getSparkDeviceName(), retrofitError.getResponse().getReason()));
                     Log.w("FromOnPostExecute", retrofitError.getMessage());
                 }
             });
@@ -208,10 +219,20 @@ public class MainActivity extends ActionBarActivity {
         };
         RestAdapter restAdapter = new RestAdapter.Builder()
                 .setLogLevel(RestAdapter.LogLevel.FULL)
+                .setClient(new UrlConnectionClientWithShorterTimeout())
                 .setEndpoint("https://api.spark.io")
                 .setRequestInterceptor(requestInterceptor)
                 .build();
         this.sparkService = restAdapter.create(SparkService.class);
+    }
+
+    public final class UrlConnectionClientWithShorterTimeout extends UrlConnectionClient {
+        @Override protected java.net.HttpURLConnection openConnection(Request request) throws IOException {
+            java.net.HttpURLConnection connection = super.openConnection(request);
+            connection.setConnectTimeout(5 * 1000);
+            connection.setReadTimeout(10 * 1000);
+            return connection;
+        }
     }
 
     String getSparkDeviceName() {
@@ -223,7 +244,12 @@ public class MainActivity extends ActionBarActivity {
 
     private void retrieveSparkDevice(String deviceId, String authenticationToken) {
         if (authenticationToken != "" && deviceId != "") {
+            this.setCurrentState(State.TestingConnectionToSpark, String.format("Trying to connect to %s...", getSparkDeviceName()));
+
             sparkService.getDevice(deviceId, new SetActiveDeviceCallback(deviceId));
+        }
+        else {
+            this.setCurrentState(State.SparkNotConfigured);
         }
     }
 
@@ -231,17 +257,27 @@ public class MainActivity extends ActionBarActivity {
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
         String deviceId = sharedPreferences.getString(PreferenceKeys.DEVICE_ID, "");
         String authenticationToken = sharedPreferences.getString(PreferenceKeys.AUTHENTICATION_TOKEN, "");
-        if (authenticationToken != "" && deviceId != "")
-        {
-            this.messageTextView.setText(String.format("Trying to connect to %s...", getSparkDeviceName()));
-            this.setCurrentState(State.TestingConnectionToSpark);
-
-            this.retrieveSparkDevice(deviceId, authenticationToken);
-        }
+        this.retrieveSparkDevice(deviceId, authenticationToken);
     }
 
     private void setCurrentState(State newState) {
+        String message = null;
+
+        switch (newState) {
+            case SparkNotConfigured:
+                message = "Please configure your Spark device in Settings";
+                break;
+            case TargetHostNotConfigured:
+                message = "Please configure the computer to wake up in Settings";
+                break;
+        }
+
+        this.setCurrentState(newState, message);
+    }
+
+    private void setCurrentState(State newState, String message) {
         this.currentState = newState;
+        this.messageTextView.setText(message);
         this.updateButtons();
     }
 
@@ -290,35 +326,45 @@ public class MainActivity extends ActionBarActivity {
 
         @Override
         public void success(SparkVariable sparkVariable, Response response) {
-            messageTextView.setText(String.format("%s is online.", getSparkDeviceName()));
-            setCurrentState(State.ConnectedToSpark);
+            SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(getBaseContext());
+            String ipAddress = sharedPreferences.getString(PreferenceKeys.IP_ADDRESS, "");
+            String macAddress = sharedPreferences.getString(PreferenceKeys.MAC_ADDRESS, "");
+            if (ipAddress == "" || macAddress == "")
+                setCurrentState(State.TargetHostNotConfigured);
+            else
+                setCurrentState(State.ConnectedToSpark, String.format("%s is online", getSparkDeviceName()));
         }
 
         @Override
         public void failure(RetrofitError retrofitError) {
-            progress.setVisibility(View.GONE);
-
-            if (retrofitError.getResponse().getStatus() == 404) {
-                messageTextView.setText(String.format("%s needs to be flashed with the WOL firmware.", getSparkDeviceName()));
-                setCurrentState(State.SparkNotFlashed);
+            Response response = retrofitError.getResponse();
+            if (response != null && response.getStatus() == 404) {
+                setCurrentState(State.SparkNotFlashed, String.format("%s needs to be flashed with the WOL firmware\n\nThis functionality is disabled due to a possible bug in Spark cloud flash procedure", getSparkDeviceName()));
                 return;
             }
 
-            Toast.makeText(getBaseContext(), String.format("Could not retrieve status from %s", getSparkDeviceName()), Toast.LENGTH_LONG).show();
-            messageTextView.setText(String.format("Could not retrieve status from %s: %s", getSparkDeviceName(), retrofitError.getResponse().getReason()));
-            setCurrentState(State.NoConnectionToSpark);
-            Log.w("FromOnPostExecute", retrofitError.getMessage());
+            displayRestFailure(retrofitError, State.NoConnectionToSpark);
         }
     }
 
-    private class WakeUpMachineCallback implements Callback<Response> {
+    private void displayRestFailure(RetrofitError retrofitError, State newState) {
+        Response response = retrofitError.getResponse();
+        Log.w("FromOnPostExecute", retrofitError.getMessage());
+
+        displayToast(String.format("Could not communicate with %s", getSparkDeviceName()));
+        if (response != null)
+            setCurrentState(newState, String.format("Could not communicate with %s: %s", getSparkDeviceName(), response.getReason()));
+        else
+            setCurrentState(newState, String.format("Could not communicate with %s", getSparkDeviceName()));
+    }
+
+    private class WakeUpHostCallback implements Callback<Response> {
         private final String deviceId;
 
-        public WakeUpMachineCallback(String deviceId) {
+        public WakeUpHostCallback(String deviceId) {
             this.deviceId = deviceId;
 
-            messageTextView.setText("Waking up machine...");
-            setCurrentState(State.SendingWakeOnLan);
+            setCurrentState(State.SendingWakeOnLan, "Waking up computer...");
         }
 
         @Override
@@ -326,7 +372,7 @@ public class MainActivity extends ActionBarActivity {
             Runnable runnable = new Runnable() {
                 @Override
                 public void run() {
-                    sparkService.getVariable("state", deviceId, new WaitForMachineToWakeUpCallback(deviceId));
+                    sparkService.getVariable("state", deviceId, new WaitForHostToWakeUpCallback(deviceId));
                 }
             };
 
@@ -336,18 +382,17 @@ public class MainActivity extends ActionBarActivity {
 
         @Override
         public void failure(RetrofitError retrofitError) {
-            Toast.makeText(getBaseContext(), String.format("Could not retrieve status from %s", getSparkDeviceName()), Toast.LENGTH_LONG).show();
+            displayToast(String.format("Could not retrieve status from %s", getSparkDeviceName()));
             Log.w("FromOnPostExecute", retrofitError.getMessage());
 
-            messageTextView.setText("");
-            setCurrentState(State.ConnectedToSpark);
+            setCurrentState(State.ConnectedToSpark, "");
         }
     }
 
-    private class WaitForMachineToWakeUpCallback implements Callback<SparkVariable> {
+    private class WaitForHostToWakeUpCallback implements Callback<SparkVariable> {
         private final String deviceId;
 
-        public WaitForMachineToWakeUpCallback(String deviceId) {
+        public WaitForHostToWakeUpCallback(String deviceId) {
             this.deviceId = deviceId;
         }
 
@@ -359,7 +404,7 @@ public class MainActivity extends ActionBarActivity {
                     Runnable runnable = new Runnable() {
                         @Override
                         public void run() {
-                            sparkService.getVariable("state", deviceId, new WaitForMachineToWakeUpCallback(deviceId));
+                            sparkService.getVariable("state", deviceId, new WaitForHostToWakeUpCallback(deviceId));
                         }
                     };
 
@@ -368,25 +413,19 @@ public class MainActivity extends ActionBarActivity {
                     break;
                 }
                 case "Unreachable":
-                    Toast.makeText(getBaseContext(), "Target machine is unreachable", Toast.LENGTH_LONG).show();
-                    messageTextView.setText(String.format("%s could not contact the target machine :-(", getSparkDeviceName()));
-                    setCurrentState(State.ConnectedToSpark);
+                    displayToast("Target computer is unreachable");
+                    setCurrentState(State.ConnectedToSpark, String.format("%s could not contact the target computer", getSparkDeviceName()));
                     break;
                 case "Reachable":
-                    Toast.makeText(getBaseContext(), "Machine is awake!", Toast.LENGTH_LONG).show();
-                    messageTextView.setText("Machine is awake!");
-                    setCurrentState(State.ConnectedToSpark);
+                    displayToast("Target computer is awake!");
+                    setCurrentState(State.ConnectedToSpark, "Target computer is awake!");
                     break;
             }
         }
 
         @Override
         public void failure(RetrofitError retrofitError) {
-            Toast.makeText(getBaseContext(), String.format("Could not retrieve status from %s", getSparkDeviceName()), Toast.LENGTH_LONG).show();
-            Log.w("FromOnPostExecute", retrofitError.getMessage());
-
-            messageTextView.setText(String.format("Could not retrieve status from %s:\n%s", getSparkDeviceName(), retrofitError.getResponse().getReason()));
-            setCurrentState(State.ConnectedToSpark);
+            displayRestFailure(retrofitError, State.ConnectedToSpark);
         }
     }
 
@@ -394,21 +433,20 @@ public class MainActivity extends ActionBarActivity {
         private final String deviceId;
 
         public SetActiveDeviceCallback(String deviceId) {
-
             this.deviceId = deviceId;
         }
 
         @Override
         public void success(SparkDevice sparkDevice, Response response) {
             selectedSparkDevice = sparkDevice;
-            messageTextView.setText(String.format("Connected to %s", getSparkDeviceName()));
+            messageTextView.setText(String.format("Connecting to %s", getSparkDeviceName()));
             flashSparkButton.setText(String.format("Flash %s", getSparkDeviceName()));
             sparkService.getVariable("state", deviceId, new DetermineSparkStatusCallback());
         }
 
         @Override
         public void failure(RetrofitError retrofitError) {
-            setCurrentState(State.NoConnectionToSpark);
+            displayRestFailure(retrofitError, State.NoConnectionToSpark);
         }
     }
 }

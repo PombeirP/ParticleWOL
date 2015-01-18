@@ -63,6 +63,7 @@
             android:drawableLeft="@drawable/ic_file_file_upload"
             android:id="@+id/flashSparkButton"
             android:onClick="onFlashSparkButtonClick"
+            android:enabled="false"
             android:visibility="gone"/>
 
         <ProgressBar
