@@ -217,7 +217,7 @@ public class SettingsActivity extends PreferenceActivity {
                 if (authToken.length() > 0) {
                     if (deviceIdPreference != null && deviceIdEntries != null) {
                         if (deviceIdEntries.length > 0) {
-                            if (deviceIdPreference.getEntry() == null) {
+                            if (deviceIdPreference.getSummary() == null) {
                                 deviceIdPreference.setSummary(R.string.pref_device_select_device);
                             }
                         } else {
