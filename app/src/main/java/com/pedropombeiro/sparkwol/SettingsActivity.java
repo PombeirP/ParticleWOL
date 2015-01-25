@@ -2,7 +2,6 @@ package com.pedropombeiro.sparkwol;
 
 import android.annotation.TargetApi;
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.os.Build;
 import android.os.Bundle;
@@ -20,7 +19,6 @@ import java.util.List;
 
 import retrofit.Callback;
 import retrofit.RequestInterceptor;
-import retrofit.RestAdapter;
 import retrofit.RetrofitError;
 import retrofit.client.Response;
 
@@ -50,19 +48,9 @@ public class SettingsActivity extends PreferenceActivity {
     protected void onPostCreate(Bundle savedInstanceState) {
         super.onPostCreate(savedInstanceState);
 
-        createSparkService();
+        this.sparkService = SparkServiceProvider.createSparkService(new AuthorizationTokenRequestInterceptor());
 
         setupSimplePreferencesScreen();
-    }
-
-    private void createSparkService() {
-        this.requestInterceptor = new AuthorizationTokenRequestInterceptor();
-        RestAdapter restAdapter = new RestAdapter.Builder()
-                .setLogLevel(RestAdapter.LogLevel.FULL)
-                .setEndpoint("https://api.spark.io")
-                .setRequestInterceptor(this.requestInterceptor)
-                .build();
-        this.sparkService = restAdapter.create(SparkService.class);
     }
 
     /**
@@ -252,6 +240,9 @@ public class SettingsActivity extends PreferenceActivity {
                         public void failure(RetrofitError retrofitError) {
                             Toast.makeText(getBaseContext(), "Error requesting Spark device list", Toast.LENGTH_LONG).show();
                             Log.w("FromOnPostExecute", retrofitError.getMessage());
+
+                            ListPreference deviceIdPreference = (ListPreference) findPreference(PreferenceKeys.DEVICE_ID);
+                            bindPreferenceSummaryToValue(deviceIdPreference);
                         }
                     });
                 }

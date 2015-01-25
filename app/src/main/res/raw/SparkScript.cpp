@@ -1,5 +1,5 @@
 // Define the pins we're going to call pinMode on
-int led2 = D7; // This one is the built-in tiny one to the right of the USB jack
+int LED = D7; // This one is the built-in tiny one to the right of the USB jack
 
 #define MAC_BYTES 6
 #define REPEAT_MAC 16
@@ -8,19 +8,23 @@ int led2 = D7; // This one is the built-in tiny one to the right of the USB jack
 uint16_t port = 7;
 IPAddress broadcastIP(255,255,255,255);
 IPAddress pingIP;
-char szState[32];
+char szWolState[32];
+char szSparkHostAddress[16];
 
-#define NOT_CONNECTED 0
-#define WAITING 1
-#define SENDING_WOL 2
-#define WOL_SENT 3
-#define TESTING_AWAKE 4
-#define TESTING_AWAKE_2 5
-#define TESTING_AWAKE_3 6
-#define FAILED_TO_WAKE_WAITING 7
-#define CONFIRMED_AWAKE_WAITING 8
+enum WolState
+{
+    NotConnected,
+    Waiting,
+    SendingWol,
+    WolSent,
+    TestingAwake,
+    TestingAwake2,
+    TestingAwake3,
+    FailedToWakeWaiting,
+    ConfirmedAwakeWaiting,
+};
 
-int state = NOT_CONNECTED;
+WolState wolState = NotConnected;
 
 uint8_t hex_to_byte(uint8_t h, uint8_t l) {
     uint8_t retval = 0x00;
@@ -90,11 +94,21 @@ bool parseIPAddress(String string, IPAddress* target) {
     return true;
 }
 
+void formatIPAddress(const IPAddress& ipAddress, char* target) {
+    String ip(ipAddress[0]);
+    for (int i = 1; i < 4; ++i)
+    {
+        ip.concat(".");
+        ip.concat(ipAddress[i]);
+    }
+    ip.toCharArray(target, ip.length() + 1);
+}
+
 int wake(const char* mac) {
     uint8_t contents[MAGIC_HEADER_LENGTH + REPEAT_MAC * MAC_BYTES];
     uint8_t rawMac[MAC_BYTES];
 
-    state = SENDING_WOL;
+    wolState = SendingWol;
 
     parseMacAddress(mac, rawMac);
 
@@ -109,28 +123,26 @@ int wake(const char* mac) {
         contents[i] = rawMac[(i - MAGIC_HEADER_LENGTH) % MAC_BYTES];
     }
 
-    Serial.write("Packet:");
-    Serial.write(contents, sizeof contents);
     udp.write(contents, sizeof contents);
 
     udp.endPacket();
     udp.stop();
 
-    state = WOL_SENT;
+    wolState = WolSent;
 
     return TRUE;
 }
 int wakeHost(String param) {
     if (param.length() == 0)
     {
-        strcpy(szState, "Invalid arguments");
+        strcpy(szWolState, "Invalid arguments");
         return FALSE;
     }
 
     int index = param.indexOf(';');
     if (index == -1 || param.indexOf(';', index + 1) >= 0 || !parseIPAddress(param.substring(0, index), &pingIP))
     {
-        strcpy(szState, "Invalid arguments");
+        strcpy(szWolState, "Invalid arguments");
         return FALSE;
     }
 
@@ -138,57 +150,79 @@ int wakeHost(String param) {
     param.substring(index + 1).toCharArray(szMacAddress, 80);
     return wake(szMacAddress);
 }
+int pingHost(String param) {
+    if (param.length() == 0)
+    {
+        strcpy(szWolState, "Invalid arguments");
+        return FALSE;
+    }
+
+    if (!parseIPAddress(param, &pingIP))
+    {
+        strcpy(szWolState, "Invalid arguments");
+        return FALSE;
+    }
+
+	wolState = TestingAwake;
+    return TRUE;
+}
 
 void setup() {
-    pinMode(led2, OUTPUT);
+    pinMode(LED, OUTPUT);
 
-    strcpy(szState, "");
-    Spark.variable("state", &szState, STRING);
+    strcpy(szWolState, "");
+    Spark.variable("state", &szWolState, STRING);
+	
+    formatIPAddress(WiFi.localIP(), szSparkHostAddress);
+    Spark.variable("address", &szSparkHostAddress, STRING);
 
     Spark.function("wakeHost", wakeHost);
+    Spark.function("pingHost", pingHost);
 
-    Serial.begin(9600);
-
-    state = WAITING;
+    wolState = Waiting;
 
     RGB.control(true); // take control of the LED
     RGB.brightness(20); // Lower LED intensity
 }
 
 void loop() {
-    switch (state)
+    switch (wolState)
     {
-        case WOL_SENT:
-            strcpy(szState, "Sent WOL");
-            digitalWrite(led2, HIGH);
+        case NotConnected:
+        case Waiting:
+        case SendingWol:
+            return;
+        case WolSent:
+            strcpy(szWolState, "Sent WOL");
+            digitalWrite(LED, HIGH);
             delay(250);               // Wait for 250mS
-            digitalWrite(led2, LOW);
+            digitalWrite(LED, LOW);
             delay(250);               // Wait for 250mS
-            digitalWrite(led2, HIGH);
+            digitalWrite(LED, HIGH);
             delay(250);               // Wait for 250mS
-            digitalWrite(led2, LOW);
+            digitalWrite(LED, LOW);
             delay(1000);              // Wait for 1 second
 
-            state = TESTING_AWAKE;
+            wolState = TestingAwake;
             break;
-        case TESTING_AWAKE_2:
-        case TESTING_AWAKE_3:
+        case TestingAwake2:
+        case TestingAwake3:
             delay(1000);              // Wait for 1 second
-        case TESTING_AWAKE:
+        case TestingAwake:
         {
-            strcpy(szState, "Pinging");
-            digitalWrite(led2, HIGH);
+            strcpy(szWolState, "Pinging");
+            digitalWrite(LED, HIGH);
             delay(250);               // Wait for 250mS
-            digitalWrite(led2, LOW);
+            digitalWrite(LED, LOW);
 
             if (WiFi.ping(pingIP) > 0)
-                state = CONFIRMED_AWAKE_WAITING;
+                wolState = ConfirmedAwakeWaiting;
             else
-                ++state;
+                wolState = (WolState) (wolState + 1);
             break;
         }
-        case CONFIRMED_AWAKE_WAITING:
-            strcpy(szState, "Reachable");
+        case ConfirmedAwakeWaiting:
+            strcpy(szWolState, "Reachable");
             RGB.color(0, 255, 0);
             delay(1000);               // Wait for 1 seconds
             RGB.color(0, 0, 0);
@@ -196,14 +230,14 @@ void loop() {
             RGB.color(0, 255, 0);
             delay(1000);               // Wait for 1 seconds
             RGB.color(0, 0, 0);        // Disable LED
-            state = WAITING;
+            wolState = Waiting;
             break;
-        case FAILED_TO_WAKE_WAITING:
-            strcpy(szState, "Unreachable");
+        case FailedToWakeWaiting:
+            strcpy(szWolState, "Unreachable");
             RGB.color(255, 0, 0);
             delay(2000);               // Wait for 2 seconds
             RGB.color(0, 0, 0);        // Disable LED
-            state = WAITING;
+            wolState = Waiting;
             break;
     }
 }

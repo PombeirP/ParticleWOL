@@ -1,7 +1,9 @@
 package com.pedropombeiro.sparkwol;
 
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.Resources;
 import android.os.Bundle;
 import android.os.Handler;
 import android.preference.PreferenceManager;
@@ -16,19 +18,18 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileWriter;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.Reader;
 import java.io.StringWriter;
 import java.io.Writer;
 
 import retrofit.Callback;
 import retrofit.RequestInterceptor;
-import retrofit.RestAdapter;
 import retrofit.RetrofitError;
 import retrofit.client.Request;
 import retrofit.client.Response;
@@ -66,7 +67,16 @@ public class MainActivity extends ActionBarActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        this.createSparkService();
+        this.sparkService = SparkServiceProvider.createSparkService(new RequestInterceptor() {
+            @Override
+            public void intercept(RequestFacade request) {
+                SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(getBaseContext());
+                String authenticationToken = sharedPreferences.getString(PreferenceKeys.AUTHENTICATION_TOKEN, "");
+
+                if (authenticationToken != "")
+                    request.addHeader("Authorization", String.format("Bearer %s", authenticationToken));
+            }
+        });
 
         this.wakeComputerButton = (Button) findViewById(R.id.wakeComputerButton);
         this.flashSparkButton = (Button) findViewById(R.id.flashSparkButton);
@@ -177,16 +187,14 @@ public class MainActivity extends ActionBarActivity {
         }
 
         try {
-            String firmware = convertStreamToString(getResources().openRawResource(R.raw.sparkscript));
             File firmwareFile = getBaseContext().getCacheDir().createTempFile("spark", "firmware");
+            Integer[] resourceIds = {R.raw.firmware};
+            createFile(firmwareFile, getBaseContext(), resourceIds);
             firmwareFile.deleteOnExit();
-            BufferedWriter bw = new BufferedWriter(new FileWriter(firmwareFile));
-            bw.write(firmware);
-            bw.close();
 
             this.setCurrentState(State.FlashingSpark, String.format("Trying to connect to %s...", getSparkDeviceName()));
 
-            this.sparkService.flashFirmware(new TypedFile("text/plain", firmwareFile), deviceId, new Callback<UploadSparkFirmwareResponse>() {
+            this.sparkService.flashFirmware(new TypedFile("application/octet-stream", firmwareFile), deviceId, new Callback<UploadSparkFirmwareResponse>() {
                 @Override
                 public void success(UploadSparkFirmwareResponse sparkResponse, Response response) {
                     messageTextView.setText(sparkResponse.status);
@@ -204,26 +212,6 @@ public class MainActivity extends ActionBarActivity {
         catch (Exception e) {
             Log.e("onFlashSparkButtonClick", e.getMessage());
         }
-    }
-
-    private void createSparkService() {
-        RequestInterceptor requestInterceptor = new RequestInterceptor() {
-            @Override
-            public void intercept(RequestFacade request) {
-                SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(getBaseContext());
-                String authenticationToken = sharedPreferences.getString(PreferenceKeys.AUTHENTICATION_TOKEN, "");
-
-                if (authenticationToken != "")
-                    request.addHeader("Authorization", String.format("Bearer %s", authenticationToken));
-            }
-        };
-        RestAdapter restAdapter = new RestAdapter.Builder()
-                .setLogLevel(RestAdapter.LogLevel.FULL)
-                .setClient(new UrlConnectionClientWithShorterTimeout())
-                .setEndpoint("https://api.spark.io")
-                .setRequestInterceptor(requestInterceptor)
-                .build();
-        this.sparkService = restAdapter.create(SparkService.class);
     }
 
     public final class UrlConnectionClientWithShorterTimeout extends UrlConnectionClient {
@@ -300,6 +288,37 @@ public class MainActivity extends ActionBarActivity {
         return this.currentState.equals(State.NoConnectionToSpark) || this.currentState.equals(State.ConnectedToSpark) || this.currentState.equals(State.SparkNotFlashed);
     }
 
+    public static void createFile(final File outputFile,
+                                  final Context context, final Integer[] inputRawResources)
+            throws IOException {
+
+        final OutputStream outputStream = new FileOutputStream(outputFile);
+
+        final Resources resources = context.getResources();
+        final byte[] largeBuffer = new byte[1024 * 4];
+        int totalBytes = 0;
+        int bytesRead = 0;
+
+        for (Integer resource : inputRawResources) {
+            final InputStream inputStream = resources.openRawResource(resource
+                    .intValue());
+            while ((bytesRead = inputStream.read(largeBuffer)) > 0) {
+                if (largeBuffer.length == bytesRead) {
+                    outputStream.write(largeBuffer);
+                } else {
+                    final byte[] shortBuffer = new byte[bytesRead];
+                    System.arraycopy(largeBuffer, 0, shortBuffer, 0, bytesRead);
+                    outputStream.write(shortBuffer);
+                }
+                totalBytes += bytesRead;
+            }
+            inputStream.close();
+        }
+
+        outputStream.flush();
+        outputStream.close();
+    }
+
     private String convertStreamToString(InputStream is) throws IOException {
         if (is != null) {
             Writer writer = new StringWriter();
@@ -339,7 +358,7 @@ public class MainActivity extends ActionBarActivity {
         public void failure(RetrofitError retrofitError) {
             Response response = retrofitError.getResponse();
             if (response != null && response.getStatus() == 404) {
-                setCurrentState(State.SparkNotFlashed, String.format("%s needs to be flashed with the WOL firmware\n\nThis functionality is disabled due to a possible bug in Spark cloud flash procedure", getSparkDeviceName()));
+                setCurrentState(State.SparkNotFlashed, String.format("%s needs to be flashed with the WOL firmware", getSparkDeviceName()));
                 return;
             }
 
