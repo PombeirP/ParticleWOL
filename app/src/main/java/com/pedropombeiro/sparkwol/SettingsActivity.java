@@ -48,7 +48,8 @@ public class SettingsActivity extends PreferenceActivity {
     protected void onPostCreate(Bundle savedInstanceState) {
         super.onPostCreate(savedInstanceState);
 
-        this.sparkService = SparkServiceProvider.createSparkService(new AuthorizationTokenRequestInterceptor());
+        this.requestInterceptor = new AuthorizationTokenRequestInterceptor();
+        this.sparkService = SparkServiceProvider.createSparkService(this.requestInterceptor);
 
         setupSimplePreferencesScreen();
     }
